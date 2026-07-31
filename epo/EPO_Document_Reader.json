@@ -1,0 +1,134 @@
+{
+  "name": "EPO Document Reader",
+  "nodes": [
+    {
+      "id": "fbe6bbfc-4b3b-4d1e-8642-33ae49407186",
+      "name": "When Called",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0],
+      "parameters": {
+        "inputSource": "workflowInputs",
+        "workflowInputs": {
+          "values": [
+            { "name": "documentLink", "type": "string" },
+            { "name": "pageStart", "type": "number" },
+            { "name": "pageEnd", "type": "number" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "2ec4beca-98b8-4a5d-8cfb-8562fe1bd562",
+      "name": "Build Page List",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 0],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const c = $input.first().json;\nconst MAX = 20;\nconst start = Math.max(1, Number(c.pageStart) || 1);\nlet end = Number(c.pageEnd) || start;\nif (end < start) { end = start; }\nif (end - start + 1 > MAX) { end = start + MAX - 1; }\nconst out = [];\nfor (let p = start; p <= end; p++) {\n  out.push({ json: { documentLink: String(c.documentLink), page: p } });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "9803ab14-0229-4076-8b6b-7da41695fcdb",
+      "name": "Loop Pages",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [440, 0],
+      "parameters": { "batchSize": 1, "options": {} }
+    },
+    {
+      "id": "154c7e8f-021e-47c6-9273-b6d406841bc4",
+      "name": "Download Page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [660, 120],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://ops.epo.org/3.2/rest-services/{{ $json.documentLink.toString().replace(/^[/]+/, \"\").replace(/[.]pdf$/, \"\") }}.pdf",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [{ "name": "Range", "value": "={{ Number($json.page) || 1 }}" }]
+        },
+        "options": {
+          "timeout": 60000,
+          "response": { "response": { "responseFormat": "file", "outputPropertyName": "data" } }
+        }
+      }
+    },
+    {
+      "id": "fa463f46-a1a4-4b11-861d-2f0c8d3d8814",
+      "name": "PDF to Base64",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 120],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const cur = $(\"Loop Pages\").first().json;\nconst out = [];\nconst rows = $input.all();\nfor (let i = 0; i < rows.length; i++) {\n  const buffer = await this.helpers.getBinaryDataBuffer(i, \"data\");\n  out.push({ json: { pdfBase64: buffer.toString(\"base64\"), page: cur.page } });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "02099752-9e00-4685-b164-d616a9de5012",
+      "name": "Mistral OCR",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [1100, 120],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.mistral.ai/v1/ocr",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "mistralCloudApi",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: \"mistral-ocr-latest\", document: { type: \"document_url\", document_url: \"data:application/pdf;base64,\" + $json.pdfBase64 }, include_image_base64: false }) }}",
+        "options": { "timeout": 120000 }
+      }
+    },
+    {
+      "id": "12de469f-8f0d-4cda-b20a-bdf3333f06de",
+      "name": "Tag Page",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1320, 120],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const cur = $(\"Loop Pages\").first().json;\nconst pages = ($input.first().json.pages) || [];\nconst text = pages.map(function (p) { return p.markdown || \"\"; }).join(\"\");\nreturn [{ json: { page: Number(cur.page), text: text } }];"
+      }
+    },
+    {
+      "id": "6af5cf18-f08a-4740-9131-477525096342",
+      "name": "Format Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, -120],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const called = $(\"When Called\").first().json;\nconst rows = $input.all().map(function (i) { return i.json; }).filter(function (x) { return x && x.page !== undefined && x.page !== null; });\nrows.sort(function (a, b) { return a.page - b.page; });\nconst nl = String.fromCharCode(10);\nconst sep = nl + nl + \"---\" + nl + nl;\nconst parts = rows.map(function (x) { return \"## Page \" + x.page + nl + nl + x.text; });\nreturn [{ json: { documentLink: called.documentLink, pagesReturned: rows.length, firstPage: rows.length ? rows[0].page : null, lastPage: rows.length ? rows[rows.length - 1].page : null, text: parts.join(sep) } }];"
+      }
+    }
+  ],
+  "connections": {
+    "When Called": { "main": [[{ "node": "Build Page List", "type": "main", "index": 0 }]] },
+    "Build Page List": { "main": [[{ "node": "Loop Pages", "type": "main", "index": 0 }]] },
+    "Loop Pages": {
+      "main": [
+        [{ "node": "Format Output", "type": "main", "index": 0 }],
+        [{ "node": "Download Page", "type": "main", "index": 0 }]
+      ]
+    },
+    "Download Page": { "main": [[{ "node": "PDF to Base64", "type": "main", "index": 0 }]] },
+    "PDF to Base64": { "main": [[{ "node": "Mistral OCR", "type": "main", "index": 0 }]] },
+    "Mistral OCR": { "main": [[{ "node": "Tag Page", "type": "main", "index": 0 }]] },
+    "Tag Page": { "main": [[{ "node": "Loop Pages", "type": "main", "index": 0 }]] }
+  },
+  "pinData": {},
+  "settings": { "executionOrder": "v1", "availableInMCP": true }
+}

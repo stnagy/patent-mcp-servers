@@ -1,0 +1,167 @@
+{
+  "name": "USPTO Document Reader",
+  "nodes": [
+    {
+      "id": "3c40590f-741c-4315-b9bb-45b31ab7caa2",
+      "name": "When Called",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "inputSource": "workflowInputs",
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "applicationNumberText",
+              "type": "string"
+            },
+            {
+              "name": "documentIdentifier",
+              "type": "string"
+            },
+            {
+              "name": "pageStart",
+              "type": "number"
+            },
+            {
+              "name": "pageEnd",
+              "type": "number"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "8461ee4e-a52d-4f02-a65a-5334438a59e2",
+      "name": "Download Document",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.uspto.gov/api/v1/download/applications/{{ $json.applicationNumberText.toString().replace(/[^0-9]/g, \"\") }}/{{ $json.documentIdentifier.toString().replace(/[^A-Za-z0-9]/g, \"\") }}.pdf",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "data"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "32059a84-0b1d-4299-aca1-066865708f61",
+      "name": "PDF to Base64",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const out = [];\nconst rows = $input.all();\nfor (let i = 0; i < rows.length; i++) {\n  const buffer = await this.helpers.getBinaryDataBuffer(i, \"data\");\n  out.push({ json: { pdfBase64: buffer.toString(\"base64\") } });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "98469d34-6dfd-4811-b5ca-bdb4ee562b37",
+      "name": "Mistral OCR",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.mistral.ai/v1/ocr",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "mistralCloudApi",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: \"mistral-ocr-latest\", document: { type: \"document_url\", document_url: \"data:application/pdf;base64,\" + $json.pdfBase64 }, include_image_base64: false }) }}",
+        "options": {
+          "timeout": 120000
+        }
+      }
+    },
+    {
+      "id": "9bb13a5f-32ca-4752-88c9-5eb5e00a8580",
+      "name": "Format Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const called = $(\"When Called\").first().json;\nconst pages = ($input.first().json.pages) || [];\nconst nl = String.fromCharCode(10);\nconst sep = nl + \"---\" + nl;\nconst start = Math.max(1, Number(called.pageStart) || 1);\nconst end = Math.min(pages.length, Number(called.pageEnd) || pages.length);\nconst selected = pages.slice(start - 1, end);\nconst text = selected.map(function (p) { return p.markdown || \"\"; }).join(sep);\nreturn [{ json: { applicationNumberText: called.applicationNumberText, documentIdentifier: called.documentIdentifier, totalPages: pages.length, pagesReturned: selected.length, text: text } }];"
+      }
+    }
+  ],
+  "connections": {
+    "When Called": {
+      "main": [
+        [
+          {
+            "node": "Download Document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Document": {
+      "main": [
+        [
+          {
+            "node": "PDF to Base64",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PDF to Base64": {
+      "main": [
+        [
+          {
+            "node": "Mistral OCR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mistral OCR": {
+      "main": [
+        [
+          {
+            "node": "Format Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true
+  }
+}

@@ -1,0 +1,624 @@
+{
+  "name": "EPO OPS MCP Server",
+  "nodes": [
+    {
+      "id": "318dfc88-7f3d-476e-8105-43ac4fac80af",
+      "name": "EPO OPS MCP Server",
+      "type": "@n8n/n8n-nodes-langchain.mcpTrigger",
+      "typeVersion": 2,
+      "position": [
+        100,
+        100
+      ],
+      "parameters": {
+        "path": "epo-ops"
+      }
+    },
+    {
+      "id": "47553881-850d-44d9-9ce6-82b0e58004e9",
+      "name": "EPO Biblio",
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.4,
+      "position": [
+        -400,
+        300
+      ],
+      "parameters": {
+        "toolDescription": "Get bibliographic data and abstract for one published patent document from EPO Open Patent Services. Covers 100+ jurisdictions (EP, WO, US, JP, KR, CN and more), not just Europe. Returns title, applicants, inventors, IPC and CPC classifications, publication and filing dates, and priority claims. This is the default tool for \"what is this publication\". For claim or specification text use EPO Claims or EPO Description.",
+        "method": "GET",
+        "url": "=https://ops.epo.org/3.2/rest-services/published-data/publication/epodoc/{{ $fromAI(\"publicationNumber\", \"Publication number in EPODOC form, e.g. EP2954056 or WO2014124326. A trailing kind code such as A1 or B1 is stripped automatically.\", \"string\").toUpperCase().replace(/[^A-Z0-9]/g, \"\").replace(/[A-Z][0-9]{0,2}$/, \"\") }}/biblio",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "optimizeResponse": true,
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "256010d2-2988-4f8b-9eed-66e166541ed8",
+      "name": "EPO Claims",
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.4,
+      "position": [
+        -200,
+        300
+      ],
+      "parameters": {
+        "toolDescription": "Get the full claim text of one published patent document from EPO Open Patent Services.\n\nCOVERAGE IS LIMITED. OPS full-text serves EP and WO documents reliably, plus some national collections. It does NOT serve US full text — a US number returns CLIENT.InvalidCountryCode. For US claims use a USPTO tool instead. A document that was withdrawn or refused before grant may also have no full text and returns SERVER.EntityNotFound; that is correct behaviour, not an error in the request.\n\nUse for claim construction, comparing an EP family member against its counterpart, or reading the claims of EP/WO prior art. Granted EP patents (B1) return the claims as granted, in DE, EN and FR.",
+        "method": "GET",
+        "url": "=https://ops.epo.org/3.2/rest-services/published-data/publication/epodoc/{{ $fromAI(\"publicationNumber\", \"Publication number in EPODOC form, e.g. EP2954056 or WO2014124326. A trailing kind code such as A1 or B1 is stripped automatically.\", \"string\").toUpperCase().replace(/[^A-Z0-9]/g, \"\").replace(/[A-Z][0-9]{0,2}$/, \"\") }}/claims",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "optimizeResponse": true,
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "f18ab2e7-fadf-488b-9a5a-875d5f615e3b",
+      "name": "EPO Description",
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.4,
+      "position": [
+        0,
+        300
+      ],
+      "parameters": {
+        "toolDescription": "Get the full description (specification) text of one published patent document from EPO Open Patent Services.\n\nCOVERAGE IS LIMITED, exactly as for EPO Claims: EP and WO are served, US is NOT (a US number returns CLIENT.InvalidCountryCode — use a USPTO tool for US specifications). Documents withdrawn before grant may return SERVER.EntityNotFound.\n\nResponses are very large and count against the EPO data quota — prefer EPO Biblio or EPO Claims unless the specification text itself is genuinely needed.",
+        "method": "GET",
+        "url": "=https://ops.epo.org/3.2/rest-services/published-data/publication/epodoc/{{ $fromAI(\"publicationNumber\", \"Publication number in EPODOC form, e.g. EP2954056 or WO2014124326. A trailing kind code such as A1 or B1 is stripped automatically.\", \"string\").toUpperCase().replace(/[^A-Z0-9]/g, \"\").replace(/[A-Z][0-9]{0,2}$/, \"\") }}/description",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "optimizeResponse": true,
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "fae47e30-f304-4826-9b2e-cb63d5c443e9",
+      "name": "EPO Family",
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.4,
+      "position": [
+        200,
+        300
+      ],
+      "parameters": {
+        "toolDescription": "Get the INPADOC patent family for one publication — every related filing worldwide, with publication numbers, kind codes, dates and application references. This is the authoritative way to map a US case to its EP, WO, JP, CN and other counterparts, or to determine whether two documents belong to the same invention. Returns family members without bibliographic detail; call EPO Biblio on a specific member for its title, applicant and classifications.",
+        "method": "GET",
+        "url": "=https://ops.epo.org/3.2/rest-services/family/publication/epodoc/{{ $fromAI(\"publicationNumber\", \"Publication number in EPODOC form, e.g. EP2954056 or WO2014124326. A trailing kind code such as A1 or B1 is stripped automatically.\", \"string\").toUpperCase().replace(/[^A-Z0-9]/g, \"\").replace(/[A-Z][0-9]{0,2}$/, \"\") }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "optimizeResponse": true,
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "1bf3c921-bcb9-45c3-8061-c5a8cc3243d6",
+      "name": "EPO Legal Status",
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.4,
+      "position": [
+        400,
+        300
+      ],
+      "parameters": {
+        "toolDescription": "Get the INPADOC legal-status event timeline for one publication — grant, lapse, opposition filed or withdrawn, transfer of rights, SPC extension, fee payment, withdrawal. Use to determine whether a patent is currently in force in a given state, when it lapsed, or whether it has been opposed. For EP cases the EPO Register tool gives a richer procedural history.\n\nEvents such as FIRST EXAMINATION REPORT DESPATCHED or APPLICATION WITHDRAWN tell you a document exists but not what it says — the underlying papers are only in EPO file inspection, which no API exposes. When the user asks to read one, give them:\n\nhttps://register.epo.org/application?number=EP{APPNUM}&lng=en&tab=doclist\n\nwhere {APPNUM} is the EP application number, available in this response as ops:L003EP (Document Number) for EP events, e.g. 14749020 gives https://register.epo.org/application?number=EP14749020&lng=en&tab=doclist.",
+        "method": "GET",
+        "url": "=https://ops.epo.org/3.2/rest-services/legal/publication/epodoc/{{ $fromAI(\"publicationNumber\", \"Publication number in EPODOC form, e.g. EP2954056 or WO2014124326. A trailing kind code such as A1 or B1 is stripped automatically.\", \"string\").toUpperCase().replace(/[^A-Z0-9]/g, \"\").replace(/[A-Z][0-9]{0,2}$/, \"\") }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "optimizeResponse": true,
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "f9c1844d-fb20-44b4-808e-1ae8ff0f7feb",
+      "name": "EPO Register",
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.4,
+      "position": [
+        -400,
+        500
+      ],
+      "parameters": {
+        "toolDescription": "Get the European Patent Register record for one EP or PCT publication — bibliographic data, procedural events, and procedural steps (entry into regional phase, examination communications, amendments, renewal fee payments, oppositions, transfers). EP and PCT only.\n\nIMPORTANT — this records THAT an event occurred, not the text of the document. EPO file inspection documents (Art. 94(3) communications, applicant replies, minutes, opposition briefs) are NOT available through any API. When the user needs to read one, ALWAYS give them this deep link:\n\nhttps://register.epo.org/application?number=EP{APPNUM}&lng=en&tab=doclist\n\nwhere {APPNUM} is the EP application number without the EP prefix or check digit — take it from reg:application-reference > reg:doc-number in this response (e.g. 14749020 gives https://register.epo.org/application?number=EP14749020&lng=en&tab=doclist). The Register is keyed on the APPLICATION number; a publication number will not work. Present the link explicitly rather than only mentioning that file inspection exists.",
+        "method": "GET",
+        "url": "=https://ops.epo.org/3.2/rest-services/register/publication/epodoc/{{ $fromAI(\"publicationNumber\", \"Publication number in EPODOC form, e.g. EP2954056 or WO2014124326. A trailing kind code such as A1 or B1 is stripped automatically.\", \"string\").toUpperCase().replace(/[^A-Z0-9]/g, \"\").replace(/[A-Z][0-9]{0,2}$/, \"\") }}/biblio,events,procedural-steps",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "optimizeResponse": true,
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "8d179385-0421-4f8c-b4f4-7d5794d8b0ff",
+      "name": "EPO List Documents",
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.4,
+      "position": [
+        -200,
+        500
+      ],
+      "parameters": {
+        "toolDescription": "List the available document images for one publication — full document, drawings, and first-page clipping — with page counts, the sections each contains (abstract, claims, description, drawings, search report), and a documentLink. ALWAYS call this first to obtain a documentLink before calling EPO Read Document.\n\nThese are PUBLISHED documents only (the A/B publication and its search report). EPO file inspection documents — examination communications, applicant replies, minutes, opposition papers — are NOT retrievable through this or any other tool here. If the user wants those, get the EP application number from EPO Register or EPO Biblio and give them this deep link:\n\nhttps://register.epo.org/application?number=EP{APPNUM}&lng=en&tab=doclist\n\n(e.g. application 14749020 gives https://register.epo.org/application?number=EP14749020&lng=en&tab=doclist). The Register is keyed on the APPLICATION number, not the publication number.",
+        "method": "GET",
+        "url": "=https://ops.epo.org/3.2/rest-services/published-data/publication/epodoc/{{ $fromAI(\"publicationNumber\", \"Publication number in EPODOC form, e.g. EP2954056 or WO2014124326. A trailing kind code such as A1 or B1 is stripped automatically.\", \"string\").toUpperCase().replace(/[^A-Z0-9]/g, \"\").replace(/[A-Z][0-9]{0,2}$/, \"\") }}/images",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "optimizeResponse": true,
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "7e4cea3c-53d8-49b0-a871-10b43aeed581",
+      "name": "EPO Classification",
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.4,
+      "position": [
+        0,
+        500
+      ],
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "method": "GET",
+        "optimizeResponse": false,
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 30000
+        },
+        "toolDescription": "Look up a CPC classification symbol and return its title, definition and explanatory notes. Input is a CPC symbol such as A61K, G06F 3/00, or C12N15/11. Use to interpret classification codes appearing in search results or examiner citations. NOTE: this endpoint returns XML rather than JSON — read the cpc:class-title and cpc:note elements for the substance.",
+        "url": "=https://ops.epo.org/3.2/rest-services/classification/cpc/{{ $fromAI(\"cpcSymbol\", \"A CPC classification symbol, e.g. A61K, G06F 3/00, or C12N15/11\", \"string\") }}"
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "2daa41bf-59b6-46c6-96ab-46900625f807",
+      "name": "EPO Convert Number",
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.4,
+      "position": [
+        200,
+        500
+      ],
+      "parameters": {
+        "toolDescription": "Convert a patent number between formats — original, epodoc, and docdb. Use when a number is in an unfamiliar form and the other EPO tools reject it, or to derive the EPODOC form of an application number. Input format defaults to epodoc and output format to docdb.",
+        "method": "GET",
+        "url": "=https://ops.epo.org/3.2/rest-services/number-service/publication/{{ $fromAI(\"inputFormat\", \"Input number format: original, epodoc, or docdb\", \"string\", \"epodoc\") }}/{{ encodeURIComponent($fromAI(\"number\", \"The patent number to convert, in the stated input format\", \"string\")) }}/{{ $fromAI(\"outputFormat\", \"Desired output format: original, epodoc, or docdb\", \"string\", \"docdb\") }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "optimizeResponse": true,
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "9edda9fb-a08b-4ad0-bec5-a6cef807febc",
+      "name": "EPO Search Patents",
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.4,
+      "position": [
+        400,
+        500
+      ],
+      "parameters": {
+        "toolDescription": "Search patent publications worldwide via EPO Open Patent Services using CQL (Contextual Query Language). Covers 100M+ documents from 100+ jurisdictions. Field codes: ti (title), ab (abstract), ta (title or abstract), pa (applicant), in (inventor), ipc, cpc, pn (publication number), ap (application number), pd (publication date, YYYYMMDD). Combine with and / or / not. Examples: ti=CRISPR and pa=Broad; ta=\"gene editing\" and pd within \"20200101 20221231\"; cpc=C12N15/11 and in=Zhang. Use EPO Search Register instead when you need EP or PCT register data specifically.",
+        "method": "GET",
+        "url": "https://ops.epo.org/3.2/rest-services/published-data/search/biblio",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "optimizeResponse": true,
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        },
+        "sendQuery": true,
+        "specifyQuery": "keypair",
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ $fromAI(\"q\", \"A CQL query, e.g. ti=CRISPR and pa=Broad\", \"string\") }}"
+            },
+            {
+              "name": "Range",
+              "value": "={{ $fromAI(\"range\", \"Result range as start-end, e.g. 1-25. Maximum span is 100.\", \"string\", \"1-25\") }}"
+            }
+          ]
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "14cd9077-dc95-4eb8-a613-2ac0bf6e7b49",
+      "name": "EPO Search Register",
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.4,
+      "position": [
+        600,
+        500
+      ],
+      "parameters": {
+        "toolDescription": "Search the European Patent Register for EP and PCT applications using CQL. Field codes: ti (title), pa (applicant), in (inventor), ipc, pn (publication number), ap (application number). Returns publication and application numbers, applicant, filing date, earliest priority and status — enough to disambiguate similar cases before pulling the full record with EPO Register. EP and PCT only; for worldwide coverage use EPO Search Patents.",
+        "method": "GET",
+        "url": "https://ops.epo.org/3.2/rest-services/register/search/biblio",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "optimizeResponse": true,
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        },
+        "sendQuery": true,
+        "specifyQuery": "keypair",
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ $fromAI(\"q\", \"A CQL query over the EP Register, e.g. pa=Genentech and ti=antibody\", \"string\") }}"
+            },
+            {
+              "name": "Range",
+              "value": "={{ $fromAI(\"range\", \"Result range as start-end, e.g. 1-25. Maximum span is 100.\", \"string\", \"1-25\") }}"
+            }
+          ]
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "23ff822a-6807-4bc1-b32c-4d571a992802",
+      "name": "EPO Read Document",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        800,
+        500
+      ],
+      "parameters": {
+        "description": "Download a range of pages from an EPO published document and OCR them to markdown, returned in page order with a '## Page N' heading before each.\n\nYou MUST first call EPO List Documents to obtain a documentLink AND the section start-pages; this tool cannot find a document by description. EPO List Documents reports where each section begins (e.g. CLAIMS at page 44, SEARCH_REPORT at page 56), so target the section you actually want rather than reading from page 1.\n\nEPO's API serves only one page per request, so this tool loops internally — a 10-page range means 10 OPS calls and 10 OCR pages. The range is capped at 20 pages per call. Keep ranges tight: each page counts against the EPO data quota and is billed as OCR. For a single page, set pageStart only and leave pageEnd at its default.",
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "cachedResultName": "EPO Document Reader",
+          "mode": "list",
+          "value": "REPLACE_WITH_YOUR_EPO_DOCUMENT_READER_ID"
+        },
+        "workflowInputs": {
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false,
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "documentLink",
+              "id": "documentLink",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "pageStart",
+              "id": "pageStart",
+              "required": false,
+              "type": "number"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "pageEnd",
+              "id": "pageEnd",
+              "required": false,
+              "type": "number"
+            }
+          ],
+          "value": {
+            "documentLink": "={{ $fromAI(\"documentLink\", \"The documentLink returned by EPO List Documents, e.g. published-data/images/EP/2954056/A1/fullimage\", \"string\") }}",
+            "pageStart": "={{ $fromAI(\"pageStart\", \"First page to read, 1-based. Use the section start-page values from EPO List Documents to target the section you want.\", \"number\", 1) }}",
+            "pageEnd": "={{ $fromAI(\"pageEnd\", \"Last page to read, inclusive. Defaults to pageStart (a single page). Maximum span is 20 pages.\", \"number\", 1) }}"
+          }
+        }
+      }
+    }
+  ],
+  "connections": {
+    "EPO Biblio": {
+      "ai_tool": [
+        [
+          {
+            "node": "EPO OPS MCP Server",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "EPO Claims": {
+      "ai_tool": [
+        [
+          {
+            "node": "EPO OPS MCP Server",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "EPO Description": {
+      "ai_tool": [
+        [
+          {
+            "node": "EPO OPS MCP Server",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "EPO Family": {
+      "ai_tool": [
+        [
+          {
+            "node": "EPO OPS MCP Server",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "EPO Legal Status": {
+      "ai_tool": [
+        [
+          {
+            "node": "EPO OPS MCP Server",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "EPO Register": {
+      "ai_tool": [
+        [
+          {
+            "node": "EPO OPS MCP Server",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "EPO List Documents": {
+      "ai_tool": [
+        [
+          {
+            "node": "EPO OPS MCP Server",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "EPO Classification": {
+      "ai_tool": [
+        [
+          {
+            "node": "EPO OPS MCP Server",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "EPO Convert Number": {
+      "ai_tool": [
+        [
+          {
+            "node": "EPO OPS MCP Server",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "EPO Search Patents": {
+      "ai_tool": [
+        [
+          {
+            "node": "EPO OPS MCP Server",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "EPO Search Register": {
+      "ai_tool": [
+        [
+          {
+            "node": "EPO OPS MCP Server",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "EPO Read Document": {
+      "ai_tool": [
+        [
+          {
+            "node": "EPO OPS MCP Server",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true
+  }
+}

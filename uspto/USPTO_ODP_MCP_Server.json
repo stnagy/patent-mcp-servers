@@ -1,0 +1,476 @@
+{
+  "name": "USPTO ODP MCP Server",
+  "nodes": [
+    {
+      "parameters": {
+        "toolDescription": "Get the bibliographic core for one US patent application from the USPTO Open Data Portal: title, filing and effective filing dates, applicant and inventor, current status, entity status, art unit, examiner, CPC classes, docket number, and patent/publication numbers with their dates. This is the default tool for \"what is the status of application X\". It deliberately omits the sub-collections \u2014 for those use USPTO Transactions (prosecution history), USPTO Continuity (family), USPTO Assignment (chain of title), USPTO Patent Term Adjustment, USPTO Attorney, or USPTO Documents (file wrapper).",
+        "url": "=https://api.uspto.gov/api/v1/patent/applications/{{ $fromAI(\"applicationNumberText\", \"The US patent application number, e.g. 17/123,456 or 17123456\", \"string\").replace(/[^0-9]/g, \"\") }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000
+        },
+        "optimizeResponse": true,
+        "dataField": "patentFileWrapperDataBag",
+        "fieldsToInclude": "selected",
+        "fields": "applicationNumberText,applicationMetaData.inventionTitle,applicationMetaData.filingDate,applicationMetaData.effectiveFilingDate,applicationMetaData.applicationStatusDescriptionText,applicationMetaData.applicationStatusDate,applicationMetaData.applicationTypeLabelName,applicationMetaData.entityStatusData.businessEntityStatusCategory,applicationMetaData.firstApplicantName,applicationMetaData.firstInventorName,applicationMetaData.groupArtUnitNumber,applicationMetaData.examinerNameText,applicationMetaData.patentNumber,applicationMetaData.grantDate,applicationMetaData.earliestPublicationNumber,applicationMetaData.earliestPublicationDate,applicationMetaData.cpcClassificationBag,applicationMetaData.docketNumber,applicationMetaData.customerNumber,applicationMetaData.firstInventorToFileIndicator"
+      },
+      "id": "4e887fb7-ddb1-4527-a925-bd636a374813",
+      "name": "USPTO Application Data",
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.4,
+      "position": [
+        -400,
+        112
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "toolDescription": "Get only the applicationMetaData block for one US patent application \u2014 a compact bibliographic digest without the sub-collections. Cheaper than the full application record when you only need title, dates, status, art unit or examiner.",
+        "url": "=https://api.uspto.gov/api/v1/patent/applications/{{ $fromAI(\"applicationNumberText\", \"The US patent application number, e.g. 17/123,456 or 17123456\", \"string\").replace(/[^0-9]/g, \"\") }}/meta-data",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000
+        },
+        "optimizeResponse": true
+      },
+      "id": "764a1e0e-4df0-4ae2-8e69-e59e0e5eced3",
+      "name": "USPTO Application Metadata",
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.4,
+      "position": [
+        896,
+        112
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "toolDescription": "Get the domestic continuity data for one US patent application \u2014 parent and child continuations, divisionals, continuations-in-part, and provisional priority claims. Use this to map a patent family or trace a priority chain.",
+        "url": "=https://api.uspto.gov/api/v1/patent/applications/{{ $fromAI(\"applicationNumberText\", \"The US patent application number, e.g. 17/123,456 or 17123456\", \"string\").replace(/[^0-9]/g, \"\") }}/continuity",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000
+        },
+        "optimizeResponse": true
+      },
+      "id": "5e9b22e2-8a86-4f67-8ca5-a78a6cd018ed",
+      "name": "USPTO Continuity",
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.4,
+      "position": [
+        -272,
+        112
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "toolDescription": "Get the prosecution transaction history (PAIR transaction codes and dates) for one US patent application. Use this to see the sequence of Office Actions, responses, RCEs, notices and fee payments over time.",
+        "url": "=https://api.uspto.gov/api/v1/patent/applications/{{ $fromAI(\"applicationNumberText\", \"The US patent application number, e.g. 17/123,456 or 17123456\", \"string\").replace(/[^0-9]/g, \"\") }}/transactions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000
+        },
+        "optimizeResponse": true
+      },
+      "id": "d7932e8e-dc45-4dc1-8da4-fad1926cfbbb",
+      "name": "USPTO Transactions",
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.4,
+      "position": [
+        -144,
+        112
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "toolDescription": "List the file wrapper documents for one US patent application. Returns each document with its documentIdentifier, document code, description and mail date. ALWAYS call this first to obtain a documentIdentifier before calling USPTO Read Document to OCR a specific filing.",
+        "url": "=https://api.uspto.gov/api/v1/patent/applications/{{ $fromAI(\"applicationNumberText\", \"The US patent application number, e.g. 17/123,456 or 17123456\", \"string\").replace(/[^0-9]/g, \"\") }}/documents",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000
+        },
+        "optimizeResponse": true
+      },
+      "id": "8efd5559-9c67-4a77-880a-1dbe9d412922",
+      "name": "USPTO Documents",
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.4,
+      "position": [
+        -16,
+        112
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "toolDescription": "Get the foreign priority claims for one US patent application \u2014 country, foreign application number and filing date claimed under 35 U.S.C. 119(a)-(d).",
+        "url": "=https://api.uspto.gov/api/v1/patent/applications/{{ $fromAI(\"applicationNumberText\", \"The US patent application number, e.g. 17/123,456 or 17123456\", \"string\").replace(/[^0-9]/g, \"\") }}/foreign-priority",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000
+        },
+        "optimizeResponse": true
+      },
+      "id": "b8637202-7cb6-4c62-85f7-8a7d9db1b547",
+      "name": "USPTO Foreign Priority",
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.4,
+      "position": [
+        128,
+        112
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "toolDescription": "Get the recorded assignment history for one US patent application \u2014 assignors, assignees, conveyance text, execution and recordation dates. Use this for chain of title and ownership questions.",
+        "url": "=https://api.uspto.gov/api/v1/patent/applications/{{ $fromAI(\"applicationNumberText\", \"The US patent application number, e.g. 17/123,456 or 17123456\", \"string\").replace(/[^0-9]/g, \"\") }}/assignment",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000
+        },
+        "optimizeResponse": true
+      },
+      "id": "a2bc5907-c3cf-4c3f-826b-40b87bcabfbb",
+      "name": "USPTO Assignment",
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.4,
+      "position": [
+        256,
+        112
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "toolDescription": "Get the Patent Term Adjustment record for one US patent application \u2014 A-delay, B-delay, C-delay, applicant delay, overlap, and the total PTA determination with the underlying PTA event history.",
+        "url": "=https://api.uspto.gov/api/v1/patent/applications/{{ $fromAI(\"applicationNumberText\", \"The US patent application number, e.g. 17/123,456 or 17123456\", \"string\").replace(/[^0-9]/g, \"\") }}/adjustment",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000
+        },
+        "optimizeResponse": true
+      },
+      "id": "9c416afc-6781-482a-a90e-b1228dbce9f5",
+      "name": "USPTO Patent Term Adjustment",
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.4,
+      "position": [
+        384,
+        112
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "toolDescription": "Get the attorney, agent and correspondence-address record of record for one US patent application, including customer number and registered practitioners.",
+        "url": "=https://api.uspto.gov/api/v1/patent/applications/{{ $fromAI(\"applicationNumberText\", \"The US patent application number, e.g. 17/123,456 or 17123456\", \"string\").replace(/[^0-9]/g, \"\") }}/attorney",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000
+        },
+        "optimizeResponse": true
+      },
+      "id": "00b81340-3548-4bf2-8206-1931b1a6cf1f",
+      "name": "USPTO Attorney",
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.4,
+      "position": [
+        512,
+        112
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "toolDescription": "Search US patent applications in the USPTO Open Data Portal and return a compact digest of matches. Use USPTO simplified query syntax over applicationMetaData.* fields, combined with AND / OR / NOT \u2014 for example applicationMetaData.inventionTitle:CRISPR AND applicationMetaData.applicationTypeLabelName:Utility, or applicationMetaData.firstApplicantName:\"Genentech\" AND applicationMetaData.filingDate:[2020-01-01 TO 2022-12-31]. Useful fields include inventionTitle, firstApplicantName, firstInventorName, filingDate, applicationStatusDescriptionText, applicationTypeLabelName, patentNumber, grantDate, groupArtUnitNumber and examinerNameText. The top-level \"count\" in the response is the TOTAL number of matching applications, not the number returned in this page. Use offset and limit to page through results. A zero-hit search returns count 0 rather than an error.",
+        "url": "https://api.uspto.gov/api/v1/patent/applications/search",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ $fromAI(\"q\", \"USPTO simplified search query over applicationMetaData.* fields, e.g. applicationMetaData.inventionTitle:CRISPR AND applicationMetaData.applicationTypeLabelName:Utility\", \"string\") }}"
+            },
+            {
+              "name": "offset",
+              "value": "={{ $fromAI(\"offset\", \"Zero-based result offset for paging, as a string\", \"string\", \"0\") }}"
+            },
+            {
+              "name": "limit",
+              "value": "={{ $fromAI(\"limit\", \"Maximum number of results to return in this page, as a string, max 100\", \"string\", \"25\") }}"
+            },
+            {
+              "name": "fields",
+              "value": "applicationNumberText,applicationMetaData.inventionTitle,applicationMetaData.filingDate,applicationMetaData.firstApplicantName,applicationMetaData.firstInventorName,applicationMetaData.applicationStatusDescriptionText,applicationMetaData.applicationTypeLabelName,applicationMetaData.patentNumber,applicationMetaData.grantDate,applicationMetaData.earliestPublicationNumber,applicationMetaData.earliestPublicationDate,applicationMetaData.groupArtUnitNumber,applicationMetaData.examinerNameText"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          },
+          "timeout": 30000
+        },
+        "optimizeResponse": true
+      },
+      "id": "5477e22b-fca5-465a-99ed-d88c321e11b8",
+      "name": "USPTO Search Applications",
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.4,
+      "position": [
+        640,
+        112
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "description": "Download one document from a US patent application file wrapper and OCR it to markdown text. You MUST first call USPTO Documents to list the file wrapper and obtain the documentIdentifier for the filing you want; this tool cannot find a document by description. Use it to read Office Actions, applicant remarks and amendments, notices of allowance, IDS forms, claims and specifications. pageStart and pageEnd are optional and default to pages 1 through 30.",
+        "workflowId": {
+          "__rl": true,
+          "value": "TWDoKeFY3xszWLq0",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/TWDoKeFY3xszWLq0",
+          "cachedResultName": "USPTO Document Reader"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "applicationNumberText": "={{ $fromAI(\"applicationNumberText\", \"The US patent application number the document belongs to\", \"string\") }}",
+            "documentIdentifier": "={{ $fromAI(\"documentIdentifier\", \"The documentIdentifier returned by the USPTO Documents tool for the filing to read\", \"string\") }}",
+            "pageStart": "={{ $fromAI(\"pageStart\", \"First page to return, 1-based\", \"number\", 1) }}",
+            "pageEnd": "={{ $fromAI(\"pageEnd\", \"Last page to return, inclusive\", \"number\", 30) }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "applicationNumberText",
+              "displayName": "applicationNumberText",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "documentIdentifier",
+              "displayName": "documentIdentifier",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "pageStart",
+              "displayName": "pageStart",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number"
+            },
+            {
+              "id": "pageEnd",
+              "displayName": "pageEnd",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "id": "748aa3fc-4f61-4680-aa58-b688913a6cf5",
+      "name": "USPTO Read Document",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        768,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "path": "uspto-odp"
+      },
+      "type": "@n8n/n8n-nodes-langchain.mcpTrigger",
+      "typeVersion": 2,
+      "position": [
+        48,
+        -192
+      ],
+      "id": "5d57009b-60a2-4dec-9ab6-9a9263fbb429",
+      "name": "MCP Server Trigger"
+    }
+  ],
+  "connections": {
+    "USPTO Application Data": {
+      "ai_tool": [
+        [
+          {
+            "node": "MCP Server Trigger",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "USPTO Continuity": {
+      "ai_tool": [
+        [
+          {
+            "node": "MCP Server Trigger",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "USPTO Transactions": {
+      "ai_tool": [
+        [
+          {
+            "node": "MCP Server Trigger",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "USPTO Documents": {
+      "ai_tool": [
+        [
+          {
+            "node": "MCP Server Trigger",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "USPTO Foreign Priority": {
+      "ai_tool": [
+        [
+          {
+            "node": "MCP Server Trigger",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "USPTO Assignment": {
+      "ai_tool": [
+        [
+          {
+            "node": "MCP Server Trigger",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "USPTO Patent Term Adjustment": {
+      "ai_tool": [
+        [
+          {
+            "node": "MCP Server Trigger",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "USPTO Attorney": {
+      "ai_tool": [
+        [
+          {
+            "node": "MCP Server Trigger",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "USPTO Search Applications": {
+      "ai_tool": [
+        [
+          {
+            "node": "MCP Server Trigger",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "USPTO Read Document": {
+      "ai_tool": [
+        [
+          {
+            "node": "MCP Server Trigger",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "USPTO Application Metadata": {
+      "ai_tool": [
+        [
+          {
+            "node": "MCP Server Trigger",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": true
+  }
+}
