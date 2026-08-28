@@ -587,8 +587,8 @@
       "type": "n8n-nodes-base.googleBigQuery",
       "typeVersion": 2.1,
       "position": [
-        -784,
-        1120
+        -64,
+        1216
       ],
       "retryOnFail": false,
       "alwaysOutputData": true,
@@ -603,8 +603,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -560,
-        1040
+        144,
+        1216
       ]
     },
     {
@@ -616,8 +616,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -560,
-        1232
+        144,
+        1376
       ]
     },
     {
@@ -668,7 +668,7 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
       "position": [
-        -360,
+        -64,
         1040
       ],
       "parameters": {
@@ -703,8 +703,8 @@
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.3,
       "position": [
-        -160,
-        940
+        144,
+        1040
       ],
       "parameters": {
         "mode": "once",
@@ -749,8 +749,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        40,
-        940
+        352,
+        1040
       ],
       "parameters": {
         "jsCode": "const p = String(($('Build BigQuery Query Terms').first().json || {}).cpcPrefix || \"\");\n// Read the diagnostic from the branch node, which BOTH paths pass through.\n// Normalize BigQuery Hits does not run when the query itself errored, so\n// referencing it here would throw on exactly the first-run case.\nlet prior = {};\ntry { prior = $('Subset Missing?').first().json || {}; } catch (e) { prior = {}; }\nconst tableMissing = prior.subsetTableMissing === true;\nreturn [{ json: {\n  source: \"bigquery-us-fulltext\",\n  recordType: \"diagnostic\",\n  id: \"bigquery-skipped\",\n  title: \"BigQuery US full-text search skipped - a subset build was STARTED automatically\",\n  reason: (tableMissing\n      ? \"The subset table did not exist yet, so nothing could be searched for cpc_prefix '\" + p + \"'. \"\n      : \"No subset existed for cpc_prefix '\" + p + \"'. \")\n    + \"A build was started automatically and runs in the background; it is a one-time scan of roughly 157 GB of patents-public-data and takes several minutes. US claims text was NOT searched on THIS run. Re-run the same search in a few minutes to pick up the new subset.\",\n  autoBuildStarted: true,\n  autoBuildPrefix: p,\n  autoBuildTrigger: tableMissing ? \"subset table or dataset did not exist\" : \"no rows for this CPC prefix\",\n  priorReason: String(prior.reason || \"\"),\n  subsetDocuments: 0,\n  billed: false,\n  errored: false,\n  url: \"\"\n} }];"
@@ -762,14 +762,97 @@
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        -360,
-        1320
+        -816,
+        1520
       ],
       "parameters": {
         "content": "## Auto-build on a cache miss — PROOF OF CONCEPT\n\nIf a search names a CPC subclass with no subset, this branch starts the **BigQuery Prior-Art Subset Builder** for that subclass and returns immediately.\n\n**It does not wait.** A build is a one-time ~157 GB scan taking minutes; the MCP caller times out at 60 seconds. The current run still reports that US claims text was not searched, and tells the user to re-run.\n\n### Know what this spends\n\n- Each auto-build is **~157 GB**. BigQuery's free tier is 1 TiB/month, so roughly **six builds** before the meter starts.\n- **Any authorised caller can trigger one.** The MCP trigger ships with n8n OAuth2 set, so reaching it requires authorising against the n8n instance — but every caller who gets past that can spend your BigQuery bytes by searching an unbuilt area. Authentication bounds who, not how much; the daily query-bytes quota bounds how much.\n- **There is no in-flight lock.** Re-running the same search before the build finishes fires a second build for the same prefix. Two calls, ~314 GB. Wait for the first to finish.\n\nThe Subset Builder refuses any prefix that is not a 4-character CPC subclass — an empty prefix makes `STARTS_WITH(cp.code, '')` true for every row and would insert the entire US corpus.",
         "height": 480,
         "width": 560,
         "color": 3
+      }
+    },
+    {
+      "id": "a1c7f5d2-0b44-4e19-9f31-6ac2d5e70b11",
+      "name": "Check Subset Coverage",
+      "type": "n8n-nodes-base.googleBigQuery",
+      "typeVersion": 2.1,
+      "position": [
+        -608,
+        1296
+      ],
+      "parameters": {
+        "authentication": "serviceAccount",
+        "projectId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "REPLACE_WITH_YOUR_GCP_PROJECT_ID"
+        },
+        "sqlQuery": "SELECT COUNT(*) AS subset_docs\nFROM `REPLACE_WITH_YOUR_GCP_PROJECT_ID.prior_art.us_claims_by_cpc`\nWHERE cpc_prefix = @cpcPrefix",
+        "options": {
+          "location": "US",
+          "maximumBytesBilled": "1000000000",
+          "timeoutMs": 60000,
+          "queryParameters": {
+            "namedParameters": [
+              {
+                "name": "cpcPrefix",
+                "value": "={{ $('Build BigQuery Query Terms').first().json.cpcPrefix }}"
+              }
+            ]
+          }
+        }
+      },
+      "retryOnFail": false,
+      "alwaysOutputData": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "b2d8e6c3-1c55-4f2a-8043-7bd3e6f81c22",
+      "name": "Classify Subset Coverage",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -432,
+        1296
+      ],
+      "parameters": {
+        "jsCode": "const cfg = $(\"Build BigQuery Query Terms\").first().json || {};\nconst cpcPrefix = String(cfg.cpcPrefix || \"\");\nconst item = $input.first().json || {};\nconst errText = String(item.error || item.message || \"\");\n\nlet requiredBytes = 0;\nlet ceilingBytes = 0;\nconst m = errText.match(/bytes billed: (\\d+)\\.\\s*(\\d+) or higher required/i);\nif (m) { ceilingBytes = Number(m[1]); requiredBytes = Number(m[2]); }\n\n// A missing table or dataset is the state before any subset has ever been built,\n// not a broken query, and must still reach the auto-build branch. An over-ceiling\n// or permission failure must not: there the table is too large or unreachable\n// rather than absent, and building would not help.\nconst subsetTableMissing = errText !== \"\" && requiredBytes === 0 && (\n  /not found:\\s*(table|dataset)/i.test(errText) ||\n  /(table|dataset)[^.]{0,120}not found/i.test(errText)\n);\n\nconst subsetDocs = errText ? 0 : Number(item.subset_docs || 0);\nconst subsetPresent = !errText && subsetDocs > 0;\n\nlet reason;\nif (subsetPresent) {\n  reason = \"\";\n} else if (subsetTableMissing) {\n  reason = \"The prior_art subset table or dataset does not exist yet, so US claims text could not be searched. This is the expected state before the first Subset Builder run, not a fault: \" + errText;\n} else if (requiredBytes > 0) {\n  reason = \"The subset coverage check was refused by BigQuery WITHOUT charge, above the maximumBytesBilled ceiling. Nothing was billed, and US claims text was NOT searched.\";\n} else if (errText) {\n  reason = \"BigQuery returned an error on the subset coverage check, so US claims text was NOT searched: \" + errText;\n} else if (!cpcPrefix) {\n  reason = \"No CPC symbol was supplied, so the US claims-text leg had no subset to target. US claims text was NOT searched.\";\n} else {\n  reason = \"No rows in prior_art.us_claims_by_cpc for cpc_prefix '\" + cpcPrefix + \"'. US claims text was NOT searched.\";\n}\n\nreturn [{ json: {\n  source: \"bigquery-us-fulltext\",\n  recordType: \"diagnostic\",\n  // Only the not-run path may carry the id the report reads as \"BigQuery did not\n  // run\". On the present path this record is consumed by the search node and\n  // never reaches the report, but it is named distinctly so a future rewire\n  // cannot silently mark a healthy run as skipped.\n  id: subsetPresent ? \"bigquery-coverage-ok\" : \"bigquery-skipped\",\n  title: subsetPresent ? \"Subset coverage confirmed\" : \"BigQuery US full-text search was NOT run\",\n  reason: reason,\n  subsetPresent: subsetPresent,\n  subsetDocuments: subsetDocs,\n  subsetTableMissing: subsetTableMissing,\n  overCeiling: requiredBytes > 0,\n  requiredBytes: requiredBytes,\n  ceilingBytes: ceilingBytes,\n  billed: false,\n  errored: errText ? true : false,\n  url: \"\"\n} }];"
+      }
+    },
+    {
+      "id": "c3e9f7d4-2d66-4a3b-9154-8ce4f7092d33",
+      "name": "Subset Present?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -256,
+        1296
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "subset-present",
+              "leftValue": "={{ $json.subsetPresent === true }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
       }
     }
   ],
@@ -1008,9 +1091,9 @@
       "main": [
         [
           {
-            "node": "Subset Missing?",
+            "node": "Merge All Sources",
             "type": "main",
-            "index": 0
+            "index": 3
           }
         ]
       ]
@@ -1019,9 +1102,9 @@
       "main": [
         [
           {
-            "node": "Subset Missing?",
+            "node": "Merge All Sources",
             "type": "main",
-            "index": 0
+            "index": 3
           }
         ]
       ]
@@ -1074,7 +1157,7 @@
       "main": [
         [
           {
-            "node": "BigQuery US Full-Text Search",
+            "node": "Check Subset Coverage",
             "type": "main",
             "index": 0
           }
@@ -1117,6 +1200,53 @@
             "node": "Merge All Sources",
             "type": "main",
             "index": 3
+          }
+        ]
+      ]
+    },
+    "Check Subset Coverage": {
+      "main": [
+        [
+          {
+            "node": "Classify Subset Coverage",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Classify Subset Coverage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classify Subset Coverage": {
+      "main": [
+        [
+          {
+            "node": "Subset Present?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Subset Present?": {
+      "main": [
+        [
+          {
+            "node": "BigQuery US Full-Text Search",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Subset Missing?",
+            "type": "main",
+            "index": 0
           }
         ]
       ]

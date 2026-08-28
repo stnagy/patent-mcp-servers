@@ -133,6 +133,7 @@ fine until you read `coverage.sourcesNotRun`.
 | `EPO OPS Search` | EPO OPS (OAuth2) |
 | `EPO Biblio And Cited References` | EPO OPS (OAuth2) |
 | `Broadened Classification Sweep` | EPO OPS (OAuth2) |
+| `Check Subset Coverage` | Google Service Account |
 | `BigQuery US Full-Text Search` | Google Service Account |
 
 **In `BigQuery Prior-Art Subset Builder`** — all five BigQuery nodes take the Google
@@ -157,7 +158,7 @@ instead of starting a build.
 
 Every BigQuery node in both workflows has its Project ID set to
 `REPLACE_WITH_YOUR_GCP_PROJECT_ID`, and the same placeholder appears inside the SQL of
-each query. Replace it in **all of them** — the resource-locator field *and* the SQL body.
+each query — including the new `Check Subset Coverage` node in the engine. Replace it in **all of them** — the resource-locator field *and* the SQL body.
 
 Then open `BigQuery Prior-Art Subset Builder` → **`Subset Config`** → set `cpcPrefix` to a
 CPC **subclass** (four characters: `C25B`, `A61K`, `C12N`, `H01M`) and run it manually.
@@ -177,15 +178,26 @@ You do not have to build a subset by hand first — step 6's manual run is a con
 not a prerequisite. If a search names a CPC subclass with no subset, the engine starts the
 Subset Builder for that subclass itself and returns immediately.
 
-This fires in **both** of the states that mean "no subset here": the table exists but holds
-no rows for that prefix, and the table or dataset does not exist at all — which is what a
-genuinely fresh install looks like, since the Subset Builder is what creates them. The two
-arrive by different routes (a coverage row of zero versus a BigQuery `Not found` error), so
-the run output reports which one via `autoBuildTrigger`.
+**The coverage check runs first.** `Check Subset Coverage` is a `COUNT(*)` against the
+clustered subset table, scoped to your CPC prefix, so it costs almost nothing. Only if it
+comes back non-zero does the full-text search run at all; on a miss the search is skipped
+entirely rather than executed and discarded.
+
+That check fires the build in **both** of the states that mean "no subset here": the table
+exists but holds no rows for that prefix, and the table or dataset does not exist at all —
+which is what a genuinely fresh install looks like, since the Subset Builder is what
+creates them. The two arrive by different routes (a count of zero versus a BigQuery
+`Not found` error), and the run output reports which one via `autoBuildTrigger`.
 
 It deliberately does **not** fire on any other BigQuery failure. An over-ceiling refusal
 means the table is too large, and a missing `bigquery.jobs.create` permission means it is
 unreachable; in neither case is the table absent, and starting a build would not help.
+
+**It does not wait for the build and then search.** That would be the obvious design, and
+it is the wrong one here: a build is a multi-minute scan against a 60-second MCP timeout,
+and a timeout loses the whole run — including the EPO and non-patent legs that had already
+succeeded. Returning immediately with an honest "US claims text was not searched, re-run
+in a few minutes" costs you one re-run; blocking costs you everything.
 
 **It does not wait for the build.** A build is a one-time ~157 GB scan taking minutes,
 and the MCP caller times out at 60 seconds. The run that triggered the build still
