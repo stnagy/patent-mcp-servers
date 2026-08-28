@@ -211,7 +211,7 @@ anything in the workflow.
 | Field | Meaning |
 | --- | --- |
 | `runVerdict` | `COMPLETE` / `PARTIAL` / `DEGRADED` / `UNRELIABLE`. **Read this first.** `UNRELIABLE` means no patent data was searched at all. `DEGRADED` means every variant missed and the non-patent results are unvalidated. |
-| `coverage` | Sources run and not run, variants run, zero-result and errored variants with fault codes, whether broadening fired, seed counts, cross-leg merges, BigQuery status |
+| `coverage` | Sources run, not run, and **answered-with-zero**, variants run, zero-result and errored variants with fault codes, whether broadening fired, seed counts, cross-leg merges, per-source status for BigQuery, OpenAlex and PubMed |
 | `coverage.knownGaps` | The standing limitations, including that nothing scores relevance |
 | `patentHits` | Deduplicated on normalised publication number; `sources` and `alsoSeenAs` show where each came from |
 | `nplHits` | OpenAlex and PubMed, plus examiner-cited non-patent literature |
@@ -257,6 +257,19 @@ BigQuery node in that workflow has `alwaysOutputData` set. Don't remove it.
 subset" be told apart from "no subset exists for this CPC area" — which would otherwise
 be an indistinguishable, and dangerous, zero.
 
+**A source that answered zero has answered.** Every leg emits its own status record —
+`ok` / `empty` / `errored` — and the report reads that, rather than inferring "ran" from
+whether any rows came out. Inferring it from the row count reported a legitimate zero as
+a source that failed, which is the exact distinction the rest of this kit exists to draw.
+PubMed is where it bites: it is a biomedical index driven by the same concept and synonym
+terms as the patent legs, so a mechanical or materials disclosure matching nothing there
+is the correct answer, not a fault. Such a run is `COMPLETE`, with the source listed in
+`coverage.sourcesZeroResult`.
+
+**A zero-result PubMed search still issues the esummary call with an empty id list**, and
+NCBI refuses it. That refusal is expected on this path and is classified as `empty`, not
+`errored`.
+
 ---
 
 ## Troubleshooting
@@ -271,6 +284,7 @@ be an indistinguishable, and dangerous, zero.
 | BigQuery reports "no subset covers this CPC area" | Expected until you run the Subset Builder for that CPC subclass. |
 | Subset Builder reports success but the table is empty | `alwaysOutputData` was removed from the BigQuery nodes. |
 | `runVerdict: DEGRADED` and off-topic literature | Your vocabulary missed. That is the tool working — the NPL results are unvalidated, as the verdict says. |
+| PubMed listed in `coverage.sourcesZeroResult` | It ran and matched nothing. Expected for any disclosure that is not biomedical — PubMed is searched with your patent vocabulary. Not a fault, and not a reason to change the contact email or tool name. |
 | Changes to a workflow have no effect | You saved but did not publish. Sub-workflow calls run the published version. |
 | The tool doesn't appear in your client | MCP clients cache the tool list. Reconnect the connector. |
 
