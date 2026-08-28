@@ -143,6 +143,12 @@ Open `Prior Art First Look MCP Server` → the **`Prior Art First Look`** node. 
 field reads `REPLACE_WITH_YOUR_RETRIEVAL_ENGINE_ID`. Select **Prior Art First Look —
 Retrieval Engine** from the dropdown. Leave the five input mappings as they are.
 
+Then open `Prior Art First Look — Retrieval Engine` → the **`Start Subset Build`** node.
+Its Workflow field reads `REPLACE_WITH_YOUR_SUBSET_BUILDER_ID`. Select **BigQuery
+Prior-Art Subset Builder**. Leave the `cpcPrefix` input mapping as it is. This is the
+auto-build branch — if you skip it, a search for an unbuilt CPC area fails at that node
+instead of starting a build.
+
 ### 6. Set your GCP project and build a subset
 
 Every BigQuery node in both workflows has its Project ID set to
@@ -160,6 +166,33 @@ free tier. Re-running the same prefix rebuilds only that prefix.
 > A CPC subclass is the four-character stem, not the full symbol. A search for
 > `C25B11/032` looks for the `C25B` subset. Both sides normalise to four characters, so
 > you build once per subclass, not once per group.
+
+#### Auto-build on a cache miss — proof of concept
+
+You do not have to build a subset by hand first. If a search names a CPC subclass with no
+subset, the engine starts the Subset Builder for that subclass itself and returns
+immediately.
+
+**It does not wait for the build.** A build is a one-time ~157 GB scan taking minutes,
+and the MCP caller times out at 60 seconds. The run that triggered the build still
+reports honestly that US claims text was not searched — `autoBuildStarted: true`,
+`autoBuildPrefix`, and a reason telling you to re-run. **Re-run the same search a few
+minutes later** to pick up the new subset.
+
+> ### ⚠️ Three things this spends, and one it does not guard
+>
+> - **Each auto-build is ~157 GB.** That is roughly six inside the 1 TiB monthly free
+>   tier, now spent without asking you first.
+> - **There is no in-flight lock.** Re-running before a build finishes fires a *second*
+>   build for the same prefix — two calls, ~314 GB. Wait for the first to finish.
+> - **Any caller can trigger one.** This is what makes the unauthenticated trigger
+>   materially riskier than it was: previously an unauthorised caller spent API quota,
+>   now they can spend your BigQuery bytes. Set Bearer auth before publishing.
+>
+> The one guard that *is* in place: the Subset Builder refuses any prefix that is not a
+> four-character CPC subclass. `STARTS_WITH(cp.code, '')` is true for every row, so an
+> empty or malformed prefix would have inserted the entire US corpus and billed for it.
+> `Validate CPC Prefix` throws instead.
 
 ### 7. Set your contact details
 
@@ -281,7 +314,10 @@ NCBI refuses it. That refusal is expected on this path and is classified as `emp
 | Every OPS call fails with an auth error at once | Token request misconfigured — check grant type is Client Credentials and auth is Basic Auth header. |
 | `Access Denied: ... bigquery.jobs.create` | Service account is missing `roles/bigquery.jobUser`. |
 | `ProjectId must be non-empty` aborts the whole run | A BigQuery node still holds the placeholder. Parameter validation happens before execution, so `onError` cannot catch it. |
-| BigQuery reports "no subset covers this CPC area" | Expected until you run the Subset Builder for that CPC subclass. |
+| BigQuery reports "no subset covers this CPC area" | Expected on the first search of a CPC area. A build should have started automatically — look for `autoBuildStarted: true` and re-run in a few minutes. |
+| `autoBuildStarted` never appears, and the run errors at `Start Subset Build` | That node still holds `REPLACE_WITH_YOUR_SUBSET_BUILDER_ID`. See setup step 5. |
+| `Refusing to build. '' is not a valid CPC subclass` | The search supplied no CPC symbol, or one that is not a four-character subclass. Deliberate — an empty prefix would insert the entire US corpus. |
+| Two builds ran for the same CPC area | You re-ran before the first finished. There is no in-flight lock; each build is ~157 GB. |
 | Subset Builder reports success but the table is empty | `alwaysOutputData` was removed from the BigQuery nodes. |
 | `runVerdict: DEGRADED` and off-topic literature | Your vocabulary missed. That is the tool working — the NPL results are unvalidated, as the verdict says. |
 | PubMed listed in `coverage.sourcesZeroResult` | It ran and matched nothing. Expected for any disclosure that is not biomedical — PubMed is searched with your patent vocabulary. Not a fault, and not a reason to change the contact email or tool name. |

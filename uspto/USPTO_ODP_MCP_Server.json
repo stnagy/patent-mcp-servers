@@ -3,7 +3,7 @@
   "nodes": [
     {
       "parameters": {
-        "toolDescription": "Get the bibliographic core for one US patent application from the USPTO Open Data Portal: title, filing and effective filing dates, applicant and inventor, current status, entity status, art unit, examiner, CPC classes, docket number, and patent/publication numbers with their dates. This is the default tool for \"what is the status of application X\". It deliberately omits the sub-collections \u2014 for those use USPTO Transactions (prosecution history), USPTO Continuity (family), USPTO Assignment (chain of title), USPTO Patent Term Adjustment, USPTO Attorney, or USPTO Documents (file wrapper).",
+        "toolDescription": "Get the bibliographic core for one US patent application from the USPTO Open Data Portal: title, filing and effective filing dates, applicant and inventor, current status, entity status, art unit, examiner, CPC classes, docket number, and patent/publication numbers with their dates. This is the default tool for \"what is the status of application X\". It deliberately omits the sub-collections — for those use USPTO Transactions (prosecution history), USPTO Continuity (family), USPTO Assignment (chain of title), USPTO Patent Term Adjustment, USPTO Attorney, or USPTO Documents (file wrapper).",
         "url": "=https://api.uspto.gov/api/v1/patent/applications/{{ $fromAI(\"applicationNumberText\", \"The US patent application number, e.g. 17/123,456 or 17123456\", \"string\").replace(/[^0-9]/g, \"\") }}",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
@@ -29,7 +29,7 @@
     },
     {
       "parameters": {
-        "toolDescription": "Get only the applicationMetaData block for one US patent application \u2014 a compact bibliographic digest without the sub-collections. Cheaper than the full application record when you only need title, dates, status, art unit or examiner.",
+        "toolDescription": "Get only the applicationMetaData block for one US patent application — a compact bibliographic digest without the sub-collections. Cheaper than the full application record when you only need title, dates, status, art unit or examiner.",
         "url": "=https://api.uspto.gov/api/v1/patent/applications/{{ $fromAI(\"applicationNumberText\", \"The US patent application number, e.g. 17/123,456 or 17123456\", \"string\").replace(/[^0-9]/g, \"\") }}/meta-data",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
@@ -52,7 +52,7 @@
     },
     {
       "parameters": {
-        "toolDescription": "Get the domestic continuity data for one US patent application \u2014 parent and child continuations, divisionals, continuations-in-part, and provisional priority claims. Use this to map a patent family or trace a priority chain.",
+        "toolDescription": "Get the domestic continuity data for one US patent application — parent and child continuations, divisionals, continuations-in-part, and provisional priority claims. Use this to map a patent family or trace a priority chain.",
         "url": "=https://api.uspto.gov/api/v1/patent/applications/{{ $fromAI(\"applicationNumberText\", \"The US patent application number, e.g. 17/123,456 or 17123456\", \"string\").replace(/[^0-9]/g, \"\") }}/continuity",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
@@ -121,7 +121,7 @@
     },
     {
       "parameters": {
-        "toolDescription": "Get the foreign priority claims for one US patent application \u2014 country, foreign application number and filing date claimed under 35 U.S.C. 119(a)-(d).",
+        "toolDescription": "Get the foreign priority claims for one US patent application — country, foreign application number and filing date claimed under 35 U.S.C. 119(a)-(d).",
         "url": "=https://api.uspto.gov/api/v1/patent/applications/{{ $fromAI(\"applicationNumberText\", \"The US patent application number, e.g. 17/123,456 or 17123456\", \"string\").replace(/[^0-9]/g, \"\") }}/foreign-priority",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
@@ -144,7 +144,7 @@
     },
     {
       "parameters": {
-        "toolDescription": "Get the recorded assignment history for one US patent application \u2014 assignors, assignees, conveyance text, execution and recordation dates. Use this for chain of title and ownership questions.",
+        "toolDescription": "Get the recorded assignment history for one US patent application — assignors, assignees, conveyance text, execution and recordation dates. Use this for chain of title and ownership questions.",
         "url": "=https://api.uspto.gov/api/v1/patent/applications/{{ $fromAI(\"applicationNumberText\", \"The US patent application number, e.g. 17/123,456 or 17123456\", \"string\").replace(/[^0-9]/g, \"\") }}/assignment",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
@@ -167,7 +167,7 @@
     },
     {
       "parameters": {
-        "toolDescription": "Get the Patent Term Adjustment record for one US patent application \u2014 A-delay, B-delay, C-delay, applicant delay, overlap, and the total PTA determination with the underlying PTA event history.",
+        "toolDescription": "Get the Patent Term Adjustment record for one US patent application — A-delay, B-delay, C-delay, applicant delay, overlap, and the total PTA determination with the underlying PTA event history.",
         "url": "=https://api.uspto.gov/api/v1/patent/applications/{{ $fromAI(\"applicationNumberText\", \"The US patent application number, e.g. 17/123,456 or 17123456\", \"string\").replace(/[^0-9]/g, \"\") }}/adjustment",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
@@ -213,7 +213,7 @@
     },
     {
       "parameters": {
-        "toolDescription": "Search US patent applications in the USPTO Open Data Portal and return a compact digest of matches. Use USPTO simplified query syntax over applicationMetaData.* fields, combined with AND / OR / NOT \u2014 for example applicationMetaData.inventionTitle:CRISPR AND applicationMetaData.applicationTypeLabelName:Utility, or applicationMetaData.firstApplicantName:\"Genentech\" AND applicationMetaData.filingDate:[2020-01-01 TO 2022-12-31]. Useful fields include inventionTitle, firstApplicantName, firstInventorName, filingDate, applicationStatusDescriptionText, applicationTypeLabelName, patentNumber, grantDate, groupArtUnitNumber and examinerNameText. The top-level \"count\" in the response is the TOTAL number of matching applications, not the number returned in this page. Use offset and limit to page through results. A zero-hit search returns count 0 rather than an error.",
+        "toolDescription": "Search US patent applications in the USPTO Open Data Portal and return a compact digest of matches. Use USPTO simplified query syntax over applicationMetaData.* fields, combined with AND / OR / NOT — for example applicationMetaData.inventionTitle:CRISPR AND applicationMetaData.applicationTypeLabelName:Utility, or applicationMetaData.firstApplicantName:\"Genentech\" AND applicationMetaData.filingDate:[2020-01-01 TO 2022-12-31]. Useful fields include inventionTitle, firstApplicantName, firstInventorName, filingDate, applicationStatusDescriptionText, applicationTypeLabelName, patentNumber, grantDate, groupArtUnitNumber and examinerNameText. The top-level \"count\" in the response is the TOTAL number of matching applications, not the number returned in this page. Use offset and limit to page through results. A zero-hit search returns count 0 rather than an error.",
         "url": "https://api.uspto.gov/api/v1/patent/applications/search",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
@@ -265,9 +265,8 @@
         "description": "Download one document from a US patent application file wrapper and OCR it to markdown text. You MUST first call USPTO Documents to list the file wrapper and obtain the documentIdentifier for the filing you want; this tool cannot find a document by description. Use it to read Office Actions, applicant remarks and amendments, notices of allowance, IDS forms, claims and specifications. pageStart and pageEnd are optional and default to pages 1 through 30.",
         "workflowId": {
           "__rl": true,
-          "value": "TWDoKeFY3xszWLq0",
+          "value": "REPLACE_WITH_YOUR_USPTO_DOCUMENT_READER_ID",
           "mode": "list",
-          "cachedResultUrl": "/workflow/TWDoKeFY3xszWLq0",
           "cachedResultName": "USPTO Document Reader"
         },
         "workflowInputs": {

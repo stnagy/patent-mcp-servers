@@ -59,6 +59,10 @@ the same `EPO OPS` credential as the EPO server if you already have it.
 > can spend your USPTO/EPO quota, your Mistral OCR budget, and — with Prior Art First
 > Look — your BigQuery bytes. If that matters, set Bearer or Header auth on the trigger
 > node before publishing.
+>
+> Prior Art First Look raises the stakes on this: it now builds a missing CPC subset
+> automatically, so an unauthorised caller can trigger a ~157 GB BigQuery scan simply by
+> searching an art area you have not built yet.
 
 > ### ⚠️ Retrieval is not judgment
 >
@@ -108,6 +112,10 @@ naively it scans about **157 GB per search** — roughly six searches a month. T
 Subset Builder pays that scan once per CPC subclass and leaves later searches small. Set a
 project-level daily query-bytes quota before your first run; the n8n node's `dryRun`
 option is **not** a cost guard and was observed executing and billing the query anyway.
+
+Searching an art area with no subset now **starts that build automatically** — a ~157 GB
+scan, without a confirmation step, triggerable by anyone who can reach the endpoint. The
+daily query-bytes quota is the control that actually bounds this. Set it first.
 
 ---
 

@@ -80,8 +80,8 @@ HTTP Request Tool nodes:
 ### 4. Re-point the sub-workflow reference
 
 Open `USPTO ODP MCP Server` → the **`USPTO Read Document`** node. Its Workflow
-field still carries the workflow ID from the instance this was exported from,
-which does not exist in yours.
+field reads `REPLACE_WITH_YOUR_USPTO_DOCUMENT_READER_ID`, which is not a workflow
+that exists in your instance.
 
 Re-select **USPTO Document Reader** from the dropdown. Leave the four input
 mappings (`applicationNumberText`, `documentIdentifier`, `pageStart`, `pageEnd`)
