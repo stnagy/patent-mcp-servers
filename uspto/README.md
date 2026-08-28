@@ -139,10 +139,15 @@ Application numbers may be passed with or without punctuation — `17/123,456` a
 
 ## Notes and gotchas
 
-**The MCP endpoint is unauthenticated by default.** The trigger ships with no
-authentication set, so anyone with the Production URL can spend your USPTO quota
-and your Mistral OCR budget. If that matters, set Bearer or Header auth on the
-trigger node before publishing.
+**The MCP endpoint requires authentication.** The trigger ships with **n8n OAuth2**
+set, so your client authorises against your n8n instance on first connect rather
+than accepting a pasted token. Change `Authentication` on the trigger node if you
+prefer Bearer or Header auth.
+
+Do not remove it. This workflow's webhook path (`uspto-odp`) is published here, and
+n8n Cloud hostnames derive from the account name, so an open endpoint's URL is
+guessable — and an uninvited caller spends your USPTO quota and your Mistral OCR
+budget at roughly $2 per 1,000 pages.
 
 **OCR costs money.** `USPTO Read Document` defaults to pages 1–30. A long Office
 Action with exhibits can run to hundreds of pages; pass `pageStart`/`pageEnd` to

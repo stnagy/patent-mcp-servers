@@ -63,10 +63,10 @@ says so, but nothing in the pipeline can prevent it.
 
 > ### ⚠️ This endpoint is authenticated — and that is not the whole control
 >
-> Unlike the EPO and USPTO servers in this repository, this trigger ships with
-> **n8n OAuth2** authentication set, because this is the server that can spend money
-> rather than merely quota. Your MCP client authorises against your n8n instance instead
-> of carrying a static token.
+> This trigger ships with **n8n OAuth2** authentication set, as do the EPO and USPTO
+> servers in this repository. Your MCP client authorises against your n8n instance
+> instead of carrying a static token. It matters most here, because this is the server
+> that can spend money rather than merely quota.
 >
 > That bounds *who* can call it. It does not bound *how much* they can spend: any
 > authorised caller can start a ~157 GB subset build by searching an unbuilt CPC area.

@@ -331,6 +331,7 @@
     },
     {
       "parameters": {
+        "authentication": "n8nOAuth2",
         "path": "uspto-odp"
       },
       "type": "@n8n/n8n-nodes-langchain.mcpTrigger",

@@ -53,16 +53,20 @@ the same `EPO OPS` credential as the EPO server if you already have it.
 > real call dies. The trigger records `success` in the execution log; the actual error
 > is only visible in the MCP client's response. These files ship with the trigger at v2.
 
-> ### ⚠️ Two of the three endpoints are unauthenticated
+> ### ⚠️ All three endpoints require authentication
 >
-> The **EPO** and **USPTO** triggers ship with no authentication set, so anyone with the
-> Production URL can spend your USPTO/EPO quota and your Mistral OCR budget. If that
-> matters, set Bearer or Header auth on the trigger node before publishing.
+> All three triggers ship with **n8n OAuth2** set, so your MCP client authorises against
+> your n8n instance rather than carrying a static token. Change `Authentication` on the
+> trigger node if you would rather use Bearer or Header auth, or none.
 >
-> **Prior Art First Look ships with n8n OAuth2 set**, because it is the one that can
-> spend money: it builds a missing CPC subset automatically, so a call against an unbuilt
-> art area starts a ~157 GB BigQuery scan. Authentication bounds *who* can do that. It
-> does not bound *how much* — see Cost.
+> Do not ship these open. The webhook paths are published in this repository
+> (`epo-ops`, `uspto-odp`, `prior-art-first-look`) and n8n Cloud hostnames derive from
+> the account name, so an unauthenticated endpoint's full URL is constructible by anyone
+> reading this. That costs EPO/USPTO quota and Mistral OCR budget on two of them, and
+> billable BigQuery bytes on the third.
+>
+> Authentication bounds *who* can call these. It does not bound *how much* they can
+> spend — see Cost.
 
 > ### ⚠️ Retrieval is not judgment
 >
