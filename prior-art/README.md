@@ -173,9 +173,19 @@ free tier. Re-running the same prefix rebuilds only that prefix.
 
 #### Auto-build on a cache miss — proof of concept
 
-You do not have to build a subset by hand first. If a search names a CPC subclass with no
-subset, the engine starts the Subset Builder for that subclass itself and returns
-immediately.
+You do not have to build a subset by hand first — step 6's manual run is a convenience,
+not a prerequisite. If a search names a CPC subclass with no subset, the engine starts the
+Subset Builder for that subclass itself and returns immediately.
+
+This fires in **both** of the states that mean "no subset here": the table exists but holds
+no rows for that prefix, and the table or dataset does not exist at all — which is what a
+genuinely fresh install looks like, since the Subset Builder is what creates them. The two
+arrive by different routes (a coverage row of zero versus a BigQuery `Not found` error), so
+the run output reports which one via `autoBuildTrigger`.
+
+It deliberately does **not** fire on any other BigQuery failure. An over-ceiling refusal
+means the table is too large, and a missing `bigquery.jobs.create` permission means it is
+unreachable; in neither case is the table absent, and starting a build would not help.
 
 **It does not wait for the build.** A build is a one-time ~157 GB scan taking minutes,
 and the MCP caller times out at 60 seconds. The run that triggered the build still
@@ -256,6 +266,7 @@ anything in the workflow.
 | `runVerdict` | `COMPLETE` / `PARTIAL` / `DEGRADED` / `UNRELIABLE`. **Read this first.** `UNRELIABLE` means no patent data was searched at all. `DEGRADED` means every variant missed and the non-patent results are unvalidated. |
 | `coverage` | Sources run, not run, and **answered-with-zero**, variants run, zero-result and errored variants with fault codes, whether broadening fired, seed counts, cross-leg merges, per-source status for BigQuery, OpenAlex and PubMed |
 | `coverage.knownGaps` | The standing limitations, including that nothing scores relevance |
+| `autoBuildStarted` / `autoBuildPrefix` / `autoBuildTrigger` | Present in `diagnostics` when this run started a subset build. `autoBuildTrigger` says whether the table was empty for that prefix or absent entirely. US claims text was **not** searched on this run — re-run in a few minutes. |
 | `patentHits` | Deduplicated on normalised publication number; `sources` and `alsoSeenAs` show where each came from |
 | `nplHits` | OpenAlex and PubMed, plus examiner-cited non-patent literature |
 | `verificationLog` | Every record in, kept, and **dropped** — with the reason |
@@ -326,6 +337,8 @@ NCBI refuses it. That refusal is expected on this path and is classified as `emp
 | `ProjectId must be non-empty` aborts the whole run | A BigQuery node still holds the placeholder. Parameter validation happens before execution, so `onError` cannot catch it. |
 | BigQuery reports "no subset covers this CPC area" | Expected on the first search of a CPC area. A build should have started automatically — look for `autoBuildStarted: true` and re-run in a few minutes. |
 | `autoBuildStarted` never appears, and the run errors at `Start Subset Build` | That node still holds `REPLACE_WITH_YOUR_SUBSET_BUILDER_ID`. See setup step 5. |
+| `Access Denied: ... bigquery.jobs.create`, and no build started | Correct. A permission failure is not a missing subset — fix the IAM role, then re-run. |
+| Query refused over `maximumBytesBilled`, and no build started | Also correct. The table is too large for the ceiling, not absent. Raise the ceiling or narrow the CPC area. |
 | `Refusing to build. '' is not a valid CPC subclass` | The search supplied no CPC symbol, or one that is not a four-character subclass. Deliberate — an empty prefix would insert the entire US corpus. |
 | Two builds ran for the same CPC area | You re-ran before the first finished. There is no in-flight lock; each build is ~157 GB. |
 | Subset Builder reports success but the table is empty | `alwaysOutputData` was removed from the BigQuery nodes. |

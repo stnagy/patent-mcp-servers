@@ -609,7 +609,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const item = $input.first().json || {};\nconst errText = String(item.error || item.message || \"\");\nlet requiredBytes = 0;\nlet ceilingBytes = 0;\nconst m = errText.match(/bytes billed: (\\d+)\\.\\s*(\\d+) or higher required/i);\nif (m) { ceilingBytes = Number(m[1]); requiredBytes = Number(m[2]); }\nlet reason;\nlet overCeiling = false;\nif (requiredBytes > 0) {\n  overCeiling = true;\n  const gb = (requiredBytes / 1000000000).toFixed(1);\n  const capGb = (ceilingBytes / 1000000000).toFixed(1);\n  reason = \"Query refused by BigQuery WITHOUT charge: it would scan \" + gb + \" GB, above the maximumBytesBilled ceiling of \" + capGb + \" GB. Nothing was billed. Raise the ceiling, or narrow the query with a materialised CPC subset.\";\n} else if (errText) {\n  reason = \"BigQuery returned an error, so the US full-text leg did not run: \" + errText;\n} else {\n  reason = \"The BigQuery leg did not run and returned no error text.\";\n}\nreturn [{ json: {\n  source: \"bigquery-us-fulltext\",\n  recordType: \"diagnostic\",\n  id: \"bigquery-skipped\",\n  title: \"BigQuery US full-text search was NOT run\",\n  reason: reason,\n  requiredBytes: requiredBytes,\n  ceilingBytes: ceilingBytes,\n  overCeiling: overCeiling,\n  billed: false,\n  errored: errText ? true : false,\n  url: \"\"\n} }];"
+        "jsCode": "const item = $input.first().json || {};\nconst errText = String(item.error || item.message || \"\");\nlet requiredBytes = 0;\nlet ceilingBytes = 0;\nconst m = errText.match(/bytes billed: (\\d+)\\.\\s*(\\d+) or higher required/i);\nif (m) { ceilingBytes = Number(m[1]); requiredBytes = Number(m[2]); }\n\n// A missing table or dataset is not a broken query - it is the state before any\n// subset has ever been built, i.e. the first run on a fresh install. It has to\n// reach the auto-build branch, which is why it is classified separately here.\n// An over-ceiling or permission error must NOT: there the table is too large or\n// unreachable rather than absent, and starting a build would not help.\nconst subsetTableMissing = requiredBytes === 0 && (\n  /not found:\\s*(table|dataset)/i.test(errText) ||\n  /(table|dataset)[^.]{0,120}not found/i.test(errText)\n);\n\nlet reason;\nlet overCeiling = false;\nif (requiredBytes > 0) {\n  overCeiling = true;\n  const gb = (requiredBytes / 1000000000).toFixed(1);\n  const capGb = (ceilingBytes / 1000000000).toFixed(1);\n  reason = \"Query refused by BigQuery WITHOUT charge: it would scan \" + gb + \" GB, above the maximumBytesBilled ceiling of \" + capGb + \" GB. Nothing was billed. Raise the ceiling, or narrow the query with a materialised CPC subset.\";\n} else if (subsetTableMissing) {\n  reason = \"The prior_art subset table or dataset does not exist yet, so there was nothing to search. This is the expected state before the first Subset Builder run, not a fault: \" + errText;\n} else if (errText) {\n  reason = \"BigQuery returned an error, so the US full-text leg did not run: \" + errText;\n} else {\n  reason = \"The BigQuery leg did not run and returned no error text.\";\n}\nreturn [{ json: {\n  source: \"bigquery-us-fulltext\",\n  recordType: \"diagnostic\",\n  id: \"bigquery-skipped\",\n  title: \"BigQuery US full-text search was NOT run\",\n  reason: reason,\n  requiredBytes: requiredBytes,\n  ceilingBytes: ceilingBytes,\n  overCeiling: overCeiling,\n  subsetTableMissing: subsetTableMissing,\n  subsetDocuments: 0,\n  billed: false,\n  errored: errText ? true : false,\n  url: \"\"\n} }];"
       },
       "id": "d0e40553-2d92-4753-9302-7c536794e868",
       "name": "Log Skipped BigQuery Query",
@@ -682,7 +682,7 @@
           "conditions": [
             {
               "id": "subset-missing",
-              "leftValue": "={{ $json.recordType === \"diagnostic\" && $json.id === \"bigquery-skipped\" && Number($json.subsetDocuments || 0) === 0 && /^[A-Z][0-9]{2}[A-Z]$/.test(String($('Build BigQuery Query Terms').first().json.cpcPrefix || \"\")) }}",
+              "leftValue": "={{ $json.recordType === \"diagnostic\" && $json.id === \"bigquery-skipped\" && /^[A-Z][0-9]{2}[A-Z]$/.test(String($('Build BigQuery Query Terms').first().json.cpcPrefix || \"\")) && ( $json.subsetTableMissing === true || ($json.errored !== true && Number($json.subsetDocuments || 0) === 0) ) }}",
               "operator": {
                 "type": "boolean",
                 "operation": "true",
@@ -753,7 +753,7 @@
         940
       ],
       "parameters": {
-        "jsCode": "const d = $('Normalize BigQuery Hits').first().json || {};\nconst p = String(($('Build BigQuery Query Terms').first().json || {}).cpcPrefix || \"\");\nreturn [{ json: Object.assign({}, d, {\n  title: \"BigQuery US full-text search skipped - a subset build was STARTED automatically\",\n  reason: \"No subset existed for cpc_prefix '\" + p + \"'. A build was started automatically and runs in the background; it is a one-time scan of roughly 157 GB of patents-public-data and takes several minutes. US claims text was NOT searched on THIS run. Re-run the same search in a few minutes to pick up the new subset.\",\n  autoBuildStarted: true,\n  autoBuildPrefix: p,\n  billed: false,\n  errored: false\n}) }];"
+        "jsCode": "const p = String(($('Build BigQuery Query Terms').first().json || {}).cpcPrefix || \"\");\n// Read the diagnostic from the branch node, which BOTH paths pass through.\n// Normalize BigQuery Hits does not run when the query itself errored, so\n// referencing it here would throw on exactly the first-run case.\nlet prior = {};\ntry { prior = $('Subset Missing?').first().json || {}; } catch (e) { prior = {}; }\nconst tableMissing = prior.subsetTableMissing === true;\nreturn [{ json: {\n  source: \"bigquery-us-fulltext\",\n  recordType: \"diagnostic\",\n  id: \"bigquery-skipped\",\n  title: \"BigQuery US full-text search skipped - a subset build was STARTED automatically\",\n  reason: (tableMissing\n      ? \"The subset table did not exist yet, so nothing could be searched for cpc_prefix '\" + p + \"'. \"\n      : \"No subset existed for cpc_prefix '\" + p + \"'. \")\n    + \"A build was started automatically and runs in the background; it is a one-time scan of roughly 157 GB of patents-public-data and takes several minutes. US claims text was NOT searched on THIS run. Re-run the same search in a few minutes to pick up the new subset.\",\n  autoBuildStarted: true,\n  autoBuildPrefix: p,\n  autoBuildTrigger: tableMissing ? \"subset table or dataset did not exist\" : \"no rows for this CPC prefix\",\n  priorReason: String(prior.reason || \"\"),\n  subsetDocuments: 0,\n  billed: false,\n  errored: false,\n  url: \"\"\n} }];"
       }
     },
     {
@@ -1019,9 +1019,9 @@
       "main": [
         [
           {
-            "node": "Merge All Sources",
+            "node": "Subset Missing?",
             "type": "main",
-            "index": 3
+            "index": 0
           }
         ]
       ]
