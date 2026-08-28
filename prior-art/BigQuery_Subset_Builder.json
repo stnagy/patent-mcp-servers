@@ -1,0 +1,281 @@
+{
+  "name": "BigQuery Prior-Art Subset Builder",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "f9f1aa3a-6d20-4063-bebf-4b70a5c2503b",
+      "name": "Run Subset Build",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1008,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "cpc-prefix",
+              "name": "cpcPrefix",
+              "value": "C25B",
+              "type": "string"
+            },
+            {
+              "id": "dataset",
+              "name": "dataset",
+              "value": "prior_art",
+              "type": "string"
+            },
+            {
+              "id": "table",
+              "name": "table",
+              "value": "us_claims_by_cpc",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "09c0d32c-4c71-4b9c-a657-5fc9635e992e",
+      "name": "Subset Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        -800,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "projectId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "REPLACE_WITH_YOUR_GCP_PROJECT_ID"
+        },
+        "sqlQuery": "CREATE SCHEMA IF NOT EXISTS `REPLACE_WITH_YOUR_GCP_PROJECT_ID.prior_art` OPTIONS(location=\"US\")",
+        "options": {
+          "location": "US",
+          "maximumBytesBilled": "1000000000",
+          "timeoutMs": 60000
+        }
+      },
+      "id": "08800787-8633-4ca2-9c15-ce7a5152ef6b",
+      "name": "Create Dataset",
+      "type": "n8n-nodes-base.googleBigQuery",
+      "typeVersion": 2.1,
+      "position": [
+        -608,
+        304
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "projectId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "REPLACE_WITH_YOUR_GCP_PROJECT_ID"
+        },
+        "sqlQuery": "CREATE TABLE IF NOT EXISTS `REPLACE_WITH_YOUR_GCP_PROJECT_ID.prior_art.us_claims_by_cpc` (\n  publication_number STRING,\n  country_code STRING,\n  publication_date INT64,\n  title STRING,\n  claims_text STRING,\n  cpc_prefix STRING,\n  built_at TIMESTAMP\n)\nCLUSTER BY cpc_prefix",
+        "options": {
+          "location": "US",
+          "maximumBytesBilled": "1000000000",
+          "timeoutMs": 60000
+        }
+      },
+      "id": "26561144-4e21-48de-add0-f8c0d545396b",
+      "name": "Create Subset Table",
+      "type": "n8n-nodes-base.googleBigQuery",
+      "typeVersion": 2.1,
+      "position": [
+        -400,
+        304
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "projectId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "REPLACE_WITH_YOUR_GCP_PROJECT_ID"
+        },
+        "sqlQuery": "DELETE FROM `REPLACE_WITH_YOUR_GCP_PROJECT_ID.prior_art.us_claims_by_cpc` WHERE cpc_prefix = @cpcPrefix",
+        "options": {
+          "location": "US",
+          "maximumBytesBilled": "20000000000",
+          "timeoutMs": 120000,
+          "queryParameters": {
+            "namedParameters": [
+              {
+                "name": "cpcPrefix",
+                "value": "={{ $('Subset Config').first().json.cpcPrefix }}"
+              }
+            ]
+          }
+        }
+      },
+      "id": "e3cfaec4-ab03-4445-9a98-687a7eb692a9",
+      "name": "Clear Existing Rows For Prefix",
+      "type": "n8n-nodes-base.googleBigQuery",
+      "typeVersion": 2.1,
+      "position": [
+        -208,
+        304
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "projectId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "REPLACE_WITH_YOUR_GCP_PROJECT_ID"
+        },
+        "sqlQuery": "INSERT INTO `REPLACE_WITH_YOUR_GCP_PROJECT_ID.prior_art.us_claims_by_cpc`\n  (publication_number, country_code, publication_date, title, claims_text, cpc_prefix, built_at)\nSELECT\n  pub.publication_number,\n  pub.country_code,\n  pub.publication_date,\n  (SELECT t.text FROM UNNEST(pub.title_localized) AS t WHERE t.language = 'en' LIMIT 1) AS title,\n  (SELECT STRING_AGG(c.text, '\\n') FROM UNNEST(pub.claims_localized) AS c WHERE c.language = 'en') AS claims_text,\n  @cpcPrefix AS cpc_prefix,\n  CURRENT_TIMESTAMP() AS built_at\nFROM `patents-public-data.patents.publications` AS pub\nWHERE pub.country_code = 'US'\n  AND EXISTS (SELECT 1 FROM UNNEST(pub.cpc) AS cp WHERE STARTS_WITH(cp.code, @cpcPrefix))\n  AND EXISTS (SELECT 1 FROM UNNEST(pub.claims_localized) AS c WHERE c.language = 'en' AND c.text IS NOT NULL)",
+        "options": {
+          "location": "US",
+          "maximumBytesBilled": "250000000000",
+          "timeoutMs": 600000,
+          "queryParameters": {
+            "namedParameters": [
+              {
+                "name": "cpcPrefix",
+                "value": "={{ $('Subset Config').first().json.cpcPrefix }}"
+              }
+            ]
+          }
+        }
+      },
+      "id": "e9b7456d-0b46-4841-8db4-c39db68a42b2",
+      "name": "Populate Subset From Public Data",
+      "type": "n8n-nodes-base.googleBigQuery",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        304
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "projectId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "REPLACE_WITH_YOUR_GCP_PROJECT_ID"
+        },
+        "sqlQuery": "SELECT cpc_prefix, COUNT(*) AS documents, MIN(publication_date) AS earliest, MAX(publication_date) AS latest, MAX(built_at) AS built_at FROM `REPLACE_WITH_YOUR_GCP_PROJECT_ID.prior_art.us_claims_by_cpc` GROUP BY cpc_prefix ORDER BY cpc_prefix",
+        "options": {
+          "location": "US",
+          "maximumBytesBilled": "20000000000",
+          "timeoutMs": 120000
+        }
+      },
+      "id": "73582721-cfc9-4cdf-8406-66fd73358329",
+      "name": "Report Subset Coverage",
+      "type": "n8n-nodes-base.googleBigQuery",
+      "typeVersion": 2.1,
+      "position": [
+        208,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## One-time subset build — run this per CPC area\n\nThe live search query against `patents-public-data` scans **~157 GB every run**. That is about six runs inside BigQuery's 1 TiB monthly free tier. This workflow pays that scan **once** per CPC area and writes a small clustered table the search can hit cheaply thereafter.\n\nSet `cpcPrefix` in Subset Config (e.g. C25B, A61K, C12N) and run. Re-running the same prefix deletes and rebuilds that prefix only.\n\n`maximumBytesBilled` is set to 250 GB on the populate step as a ceiling. Note that this ceiling is NOT independently verified — the n8n `dryRun` option was tested and found to execute and bill the query anyway, so treat cost controls here as unproven and watch the billing page on the first run.",
+        "height": 384,
+        "width": 576,
+        "color": 3
+      },
+      "id": "7929d32e-7917-4c95-b094-e8eaeee937e6",
+      "name": "Sticky Note 5ac4208d",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1008,
+        -112
+      ]
+    }
+  ],
+  "connections": {
+    "Run Subset Build": {
+      "main": [
+        [
+          {
+            "node": "Subset Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Subset Config": {
+      "main": [
+        [
+          {
+            "node": "Create Dataset",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Dataset": {
+      "main": [
+        [
+          {
+            "node": "Create Subset Table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Subset Table": {
+      "main": [
+        [
+          {
+            "node": "Clear Existing Rows For Prefix",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clear Existing Rows For Prefix": {
+      "main": [
+        [
+          {
+            "node": "Populate Subset From Public Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Populate Subset From Public Data": {
+      "main": [
+        [
+          {
+            "node": "Report Subset Coverage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": true
+  },
+  "pinData": {}
+}

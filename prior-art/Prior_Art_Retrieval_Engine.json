@@ -1,0 +1,981 @@
+{
+  "name": "Prior Art First Look — Retrieval Engine",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "disclosure"
+            },
+            {
+              "name": "conceptTerms"
+            },
+            {
+              "name": "synonymTerms"
+            },
+            {
+              "name": "cpc"
+            },
+            {
+              "name": "dateBefore"
+            }
+          ]
+        }
+      },
+      "id": "64b5d4e4-7ebb-46b3-8f14-22523a8b2f11",
+      "name": "Prior Art Request",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -1200,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const DQ = String.fromCharCode(34);\nconst MAX_VARIANTS = 4;\nconst src = $input.first().json;\nconst splitList = (v) => String(v || \"\").split(\",\").map((s) => s.trim()).filter((s) => s.length > 0);\nconst concepts = splitList(src.conceptTerms);\nconst synonyms = splitList(src.synonymTerms);\nconst cpc = String(src.cpc || \"\").trim();\nconst before = String(src.dateBefore || \"\").trim();\nconst dateClause = before ? (\" and pd within \" + DQ + \"19000101 \" + before + DQ) : \"\";\nconst phrase = (field, term) => field + \" all \" + DQ + term + DQ;\nconst keyword = [];\nconst classified = [];\nlet n = 0;\nfor (const c of concepts) {\n  for (const s of synonyms) {\n    n += 1;\n    keyword.push({ variantId: \"kw-\" + n, kind: \"keyword\", terms: c + \" + \" + s, cql: phrase(\"ta\", c) + \" and \" + phrase(\"ta\", s) + dateClause });\n  }\n}\nif (cpc) {\n  let m = 0;\n  for (const s of synonyms) {\n    m += 1;\n    classified.push({ variantId: \"cls-\" + m, kind: \"classification\", terms: cpc + \" + \" + s, cql: phrase(\"cpc\", cpc) + \" and \" + phrase(\"ta\", s) + dateClause });\n  }\n}\nconst out = [];\nconst half = Math.max(1, Math.floor(MAX_VARIANTS / 2));\nconst kwTake = classified.length > 0 ? Math.min(keyword.length, MAX_VARIANTS - Math.min(classified.length, half)) : Math.min(keyword.length, MAX_VARIANTS);\nfor (let i = 0; i < kwTake; i++) { out.push({ json: keyword[i] }); }\nfor (let j = 0; j < classified.length && out.length < MAX_VARIANTS; j++) { out.push({ json: classified[j] }); }\nif (out.length === 0) { throw new Error(\"No query variants could be built. Supply at least one concept term and one synonym term.\"); }\nreturn out;"
+      },
+      "id": "f182ded9-de03-453d-add4-d06f36659f2b",
+      "name": "Build Query Plan",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1008,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const plan = $(\"Build Query Plan\").all();\nconst req = $(\"Prior Art Request\").first().json || {};\nconst responses = $input.all();\nconst seen = {};\nconst seeds = [];\nconst variantLog = [];\nconst DQ = String.fromCharCode(34);\nconst asArray = (v) => (v === undefined || v === null) ? [] : (Array.isArray(v) ? v : [v]);\nconst normId = (raw) => {\n  let s = String(raw || \"\").toUpperCase().replace(/[^A-Z0-9]/g, \"\");\n  s = s.replace(/[A-Z]\\d?$/, \"\");\n  const m = s.match(/^([A-Z]{2})(\\d+)$/);\n  if (!m) { return s; }\n  const cc = m[1];\n  let num = m[2];\n  if (cc === \"US\" && num.length === 10 && (num.slice(0, 2) === \"19\" || num.slice(0, 2) === \"20\")) {\n    num = num.slice(0, 4) + num.slice(4).padStart(7, \"0\");\n  }\n  return cc + num;\n};\n\nconst cpcRaw = String(req.cpc || \"\").trim();\nconst firstConcept = String(req.conceptTerms || \"\").split(\",\")[0].trim();\nconst broadenCql = cpcRaw ? (\"cpc all \" + DQ + cpcRaw + DQ) : (firstConcept ? (\"ta all \" + DQ + firstConcept + DQ) : \"\");\nconst broadenKind = cpcRaw ? \"classification sweep\" : \"single-concept sweep (no CPC supplied)\";\n\nconst classify = (raw) => {\n  const status = Number(raw.statusCode || 0);\n  const body = (raw.body !== undefined) ? raw.body : raw;\n  let text = \"\";\n  if (typeof body === \"string\") { text = body; }\n  else if (body && typeof body.data === \"string\") { text = body.data; }\n  if (text && text.indexOf(\"<fault\") !== -1) {\n    const m = text.match(/<code>([^<]+)<\\/code>/);\n    const code = m ? m[1] : \"UNKNOWN.Fault\";\n    if (code === \"SERVER.EntityNotFound\") { return { state: \"empty\", code: code, status: status, body: null }; }\n    return { state: \"error\", code: code, status: status, body: null };\n  }\n  if (text) { return { state: \"error\", code: \"NON_JSON_RESPONSE\", status: status, body: null }; }\n  if (status && (status < 200 || status >= 300)) {\n    if (status === 404) { return { state: \"empty\", code: \"http-404\", status: status, body: null }; }\n    return { state: \"error\", code: \"http-\" + status, status: status, body: null };\n  }\n  return { state: \"ok\", code: \"\", status: status, body: body };\n};\n\nfor (let i = 0; i < responses.length; i++) {\n  const raw = responses[i].json || {};\n  const meta = (plan[i] && plan[i].json) ? plan[i].json : { variantId: \"unknown-\" + i, kind: \"unknown\", cql: \"\" };\n  const c = classify(raw);\n  let total = 0;\n  let added = 0;\n  if (c.state === \"ok\") {\n    const search = ((c.body[\"ops:world-patent-data\"] || {})[\"ops:biblio-search\"]) || {};\n    total = parseInt(search[\"@total-result-count\"] || \"0\", 10) || 0;\n    const docs = asArray(((search[\"ops:search-result\"] || {})[\"exchange-documents\"]));\n    for (const d of docs) {\n      const ed = (d || {})[\"exchange-document\"] || d || {};\n      const country = ed[\"@country\"];\n      const docNumber = ed[\"@doc-number\"];\n      if (!country || !docNumber) { continue; }\n      const pub = String(country) + String(docNumber);\n      if (seen[pub]) { continue; }\n      seen[pub] = true;\n      added += 1;\n      seeds.push({ publicationNumber: pub, normalizedId: normId(pub), kindCode: ed[\"@kind\"] || \"\", foundBy: meta.variantId, foundByKind: meta.kind, foundByQuery: meta.cql });\n    }\n  }\n  variantLog.push({ variantId: meta.variantId, kind: meta.kind, cql: meta.cql, state: c.state, faultCode: c.code, httpStatus: c.status, totalReported: total, newSeeds: added, zeroResult: c.state === \"empty\", errored: c.state === \"error\" });\n}\n\nconst zeroCount = variantLog.filter((v) => v.zeroResult).length;\nconst errCount = variantLog.filter((v) => v.errored).length;\nreturn [{ json: { seedCount: seeds.length, seeds: seeds, variantLog: variantLog, zeroResultVariants: zeroCount, erroredVariants: errCount, totalVariants: variantLog.length, broadenCql: broadenCql, broadenKind: broadenKind } }];"
+      },
+      "id": "7287ed6b-0bdf-4b05-aa43-d95a54a6f8ff",
+      "name": "Collect Seed Publications",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -608,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "has-seeds",
+              "leftValue": "={{ $json.seedCount }}",
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              },
+              "rightValue": 0
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "368b2199-446d-418f-b741-3c472c861fdb",
+      "name": "Seeds Found?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -400,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const src = $input.first().json || {};\nconst seeds = Array.isArray(src.seeds) ? src.seeds : [];\nconst rank = (pub) => {\n  const cc = String(pub || \"\").slice(0, 2).toUpperCase();\n  if (cc === \"WO\") { return 0; }\n  if (cc === \"EP\") { return 1; }\n  if (cc === \"US\") { return 2; }\n  if (cc === \"GB\" || cc === \"DE\" || cc === \"FR\" || cc === \"CA\" || cc === \"AU\") { return 3; }\n  return 4;\n};\nconst ordered = seeds.map((s, i) => ({ s: s, i: i, r: rank(s.publicationNumber) }));\nordered.sort((a, b) => (a.r - b.r) || (a.i - b.i));\nreturn ordered.slice(0, 4).map((o) => ({ json: Object.assign({}, o.s, { seedRank: o.r }) }));"
+      },
+      "id": "20c8553c-b3b6-4fd8-ade2-9606007a9b2b",
+      "name": "Explode Seeds",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -208,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const asArray = (v) => (v === undefined || v === null) ? [] : (Array.isArray(v) ? v : [v]);\nconst clean = (s) => { const t = String(s); return (t === \"undefined\" || t === \"null\" || t === \"[object Object]\") ? \"\" : t; };\nconst text = (v) => { if (v === undefined || v === null) { return \"\"; } if (typeof v === \"string\") { return clean(v); } if (typeof v === \"object\" && v.$ !== undefined) { return clean(v.$); } return clean(v); };\nconst normId = (raw) => {\n  let s = String(raw || \"\").toUpperCase().replace(/[^A-Z0-9]/g, \"\");\n  s = s.replace(/[A-Z]\\d?$/, \"\");\n  const m = s.match(/^([A-Z]{2})(\\d+)$/);\n  if (!m) { return s; }\n  const cc = m[1];\n  let num = m[2];\n  if (cc === \"US\" && num.length === 10 && (num.slice(0, 2) === \"19\" || num.slice(0, 2) === \"20\")) {\n    num = num.slice(0, 4) + num.slice(4).padStart(7, \"0\");\n  }\n  return cc + num;\n};\nconst rows = [];\nconst seenCite = {};\nfor (const item of $input.all()) {\n  const raw = item.json || {};\n  const body = (raw.body !== undefined) ? raw.body : raw;\n  if (typeof body === \"string\" || (body && typeof body.data === \"string\")) { continue; }\n  const docs = asArray(((body[\"ops:world-patent-data\"] || {})[\"exchange-documents\"] || {})[\"exchange-document\"]);\n  for (const ed of docs) {\n    const seedPub = String(ed[\"@country\"] || \"\") + String(ed[\"@doc-number\"] || \"\");\n    const biblio = ed[\"bibliographic-data\"] || {};\n    const titles = asArray(biblio[\"invention-title\"]);\n    let seedTitle = \"\";\n    for (const t of titles) { if (!seedTitle || t[\"@lang\"] === \"en\") { seedTitle = text(t); } }\n    const refs = asArray((biblio[\"references-cited\"] || {})[\"citation\"]);\n    for (const c of refs) {\n      if (!c || typeof c !== \"object\") { continue; }\n      const cat = asArray(c[\"category\"]).map(text).join(\"\");\n      const patcit = c[\"patcit\"];\n      const nplcit = c[\"nplcit\"];\n      const phase = text(c[\"@cited-phase\"]);\n      let citedId = \"\";\n      let citedKind = \"\";\n      if (patcit) {\n        const docIds = asArray(patcit[\"document-id\"]);\n        for (const di of docIds) {\n          if (di[\"@document-id-type\"] === \"docdb\" || !citedId) {\n            citedId = text(di[\"country\"]) + text(di[\"doc-number\"]) + text(di[\"kind\"]);\n          }\n        }\n        citedKind = \"patent\";\n      } else if (nplcit) {\n        citedId = text(nplcit[\"text\"]);\n        citedKind = \"npl\";\n      }\n      if (!citedId) { continue; }\n      const key = citedKind + \"::\" + citedId;\n      const existing = seenCite[key];\n      if (existing) {\n        if (existing.citedBySeeds.indexOf(seedPub) === -1) { existing.citedBySeeds.push(seedPub); }\n        if (phase && existing.citedPhases.indexOf(phase) === -1) { existing.citedPhases.push(phase); }\n        continue;\n      }\n      const shortNpl = citedKind === \"npl\" ? (citedId.length > 160 ? citedId.slice(0, 160) + \"...\" : citedId) : \"\";\n      const row = { source: \"epo-examiner-citation\", recordType: citedKind, id: citedId, normalizedId: citedKind === \"patent\" ? normId(citedId) : (\"NPL::\" + citedId.slice(0, 80)), title: shortNpl, examinerCategory: cat || \"\", citedPhases: phase ? [phase] : [], citedBySeeds: [seedPub], seedTitle: seedTitle, url: citedKind === \"patent\" ? (\"https://worldwide.espacenet.com/patent/search?q=\" + encodeURIComponent(citedId)) : \"\" };\n      seenCite[key] = row;\n      rows.push(row);\n    }\n  }\n}\nreturn rows.map((r) => ({ json: r }));"
+      },
+      "id": "0d94983f-f3f5-4b1a-aa88-d453aec4142b",
+      "name": "Extract Examiner Citations",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        608,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "numberInputs": 4
+      },
+      "id": "b854df3f-23fd-44f4-9acc-8e329d08f964",
+      "name": "Merge All Sources",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        912,
+        704
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://ops.epo.org/3.2/rest-services/published-data/publication/epodoc/{{ $json.publicationNumber }}/biblio",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "830c73a4-511e-4a3e-a62c-5b6e32fac423",
+      "name": "EPO Biblio And Cited References",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        400,
+        400
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "07707142-d60c-42c2-9dfc-02c306cf330b",
+      "name": "Loop Seeds",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        208,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://ops.epo.org/3.2/rest-services/published-data/search/biblio",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ $json.broadenCql }}"
+            },
+            {
+              "name": "Range",
+              "value": "1-50"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "6cdd5318-5348-4095-9eac-3b4b8d8ff74a",
+      "name": "Broadened Classification Sweep",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        -208,
+        400
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json || {};\nconst asArray = (v) => (v === undefined || v === null) ? [] : (Array.isArray(v) ? v : [v]);\nconst normId = (rawId) => {\n  let s = String(rawId || \"\").toUpperCase().replace(/[^A-Z0-9]/g, \"\");\n  s = s.replace(/[A-Z]\\d?$/, \"\");\n  const m = s.match(/^([A-Z]{2})(\\d+)$/);\n  if (!m) { return s; }\n  const cc = m[1];\n  let num = m[2];\n  if (cc === \"US\" && num.length === 10 && (num.slice(0, 2) === \"19\" || num.slice(0, 2) === \"20\")) {\n    num = num.slice(0, 4) + num.slice(4).padStart(7, \"0\");\n  }\n  return cc + num;\n};\nconst rank = (pub) => {\n  const cc = String(pub || \"\").slice(0, 2).toUpperCase();\n  if (cc === \"WO\") { return 0; }\n  if (cc === \"EP\") { return 1; }\n  if (cc === \"US\") { return 2; }\n  if (cc === \"GB\" || cc === \"DE\" || cc === \"FR\" || cc === \"CA\" || cc === \"AU\") { return 3; }\n  return 4;\n};\nconst body = (raw.body !== undefined) ? raw.body : raw;\nlet text = \"\";\nif (typeof body === \"string\") { text = body; }\nelse if (body && typeof body.data === \"string\") { text = body.data; }\nif (text) { return []; }\nconst search = ((body[\"ops:world-patent-data\"] || {})[\"ops:biblio-search\"]) || {};\nconst docs = asArray(((search[\"ops:search-result\"] || {})[\"exchange-documents\"]));\nconst seen = {};\nconst seeds = [];\nfor (const d of docs) {\n  const ed = (d || {})[\"exchange-document\"] || d || {};\n  const country = ed[\"@country\"];\n  const docNumber = ed[\"@doc-number\"];\n  if (!country || !docNumber) { continue; }\n  const pub = String(country) + String(docNumber);\n  if (seen[pub]) { continue; }\n  seen[pub] = true;\n  seeds.push({ publicationNumber: pub, normalizedId: normId(pub), kindCode: ed[\"@kind\"] || \"\", foundBy: \"broadened-sweep\", foundByKind: \"classification\", foundByQuery: \"cpc sweep after zero keyword results\" });\n}\nconst ordered = seeds.map((s, i) => ({ s: s, i: i, r: rank(s.publicationNumber) }));\nordered.sort((a, b) => (a.r - b.r) || (a.i - b.i));\nreturn ordered.slice(0, 4).map((o) => ({ json: Object.assign({}, o.s, { seedRank: o.r }) }));"
+      },
+      "id": "d03f9510-e279-4778-adb5-dd23af0288a6",
+      "name": "Collect Broadened Seeds",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://ops.epo.org/3.2/rest-services/published-data/search/biblio",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ $json.cql }}"
+            },
+            {
+              "name": "Range",
+              "value": "1-25"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "2e26eb06-65ff-4737-a94a-30f2ab7e22d5",
+      "name": "EPO OPS Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        -608,
+        560
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "0e3714d6-3ecf-46d8-aedb-acff4ef4ba82",
+      "name": "Loop Query Variants",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -800,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.openalex.org/works",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "search",
+              "value": "={{ $json.conceptTerms }} {{ $json.synonymTerms }}"
+            },
+            {
+              "name": "per-page",
+              "value": "15"
+            },
+            {
+              "name": "mailto",
+              "value": "REPLACE_WITH_YOUR_EMAIL"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "aa9bc7e5-a6fe-43b0-b89b-94047608809c",
+      "name": "OpenAlex Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        -1008,
+        704
+      ],
+      "executeOnce": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json || {};\nconst results = Array.isArray(body.results) ? body.results : [];\nreturn results.map((w) => ({ json: {\n  source: \"openalex\",\n  recordType: \"npl\",\n  id: String(w.id || \"\"),\n  title: String(w.title || \"\"),\n  year: w.publication_year || null,\n  venue: ((w.primary_location || {}).source || {}).display_name || \"\",\n  citedByCount: w.cited_by_count || 0,\n  url: String(w.doi || w.id || \"\"),\n  licenceFlag: \"OpenAlex data is CC0; the underlying articles are not. Check each source before reuse.\"\n} }));"
+      },
+      "id": "8d3afb08-bab0-4211-a57d-7b4825829f45",
+      "name": "Normalize OpenAlex",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -800,
+        704
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "db",
+              "value": "pubmed"
+            },
+            {
+              "name": "term",
+              "value": "={{ $json.conceptTerms }} {{ $json.synonymTerms }}"
+            },
+            {
+              "name": "retmode",
+              "value": "json"
+            },
+            {
+              "name": "retmax",
+              "value": "15"
+            },
+            {
+              "name": "tool",
+              "value": "REPLACE_WITH_YOUR_TOOL_NAME"
+            },
+            {
+              "name": "email",
+              "value": "REPLACE_WITH_YOUR_EMAIL"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "a5792504-b06e-4cf0-b723-91c547d1fba2",
+      "name": "PubMed Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        -1008,
+        912
+      ],
+      "executeOnce": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "db",
+              "value": "pubmed"
+            },
+            {
+              "name": "id",
+              "value": "={{ ($json.esearchresult && $json.esearchresult.idlist ? $json.esearchresult.idlist : []).join(\",\") }}"
+            },
+            {
+              "name": "retmode",
+              "value": "json"
+            },
+            {
+              "name": "tool",
+              "value": "REPLACE_WITH_YOUR_TOOL_NAME"
+            },
+            {
+              "name": "email",
+              "value": "REPLACE_WITH_YOUR_EMAIL"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "0eb126fe-74df-494d-834d-0d3b10cd0ded",
+      "name": "PubMed Summaries",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        -800,
+        912
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json || {};\nconst result = body.result || {};\nconst uids = Array.isArray(result.uids) ? result.uids : [];\nreturn uids.map((uid) => {\n  const r = result[uid] || {};\n  return { json: {\n    source: \"pubmed\",\n    recordType: \"npl\",\n    id: \"PMID:\" + String(uid),\n    title: String(r.title || \"\"),\n    year: String(r.pubdate || \"\").slice(0, 4),\n    venue: String(r.source || \"\"),\n    url: \"https://pubmed.ncbi.nlm.nih.gov/\" + String(uid) + \"/\",\n    licenceFlag: \"PubMed records are public domain; the underlying articles are not.\"\n  } };\n});"
+      },
+      "id": "45ab1be7-cd73-4377-96cb-a7beaeae4bcb",
+      "name": "Normalize PubMed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -608,
+        912
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const request = $(\"Prior Art Request\").first().json || {};\nconst collected = $(\"Collect Seed Publications\").first().json || {};\nconst rows = $input.all().map((i) => i.json || {});\n\nconst diagnostics = rows.filter((r) => r.recordType === \"diagnostic\");\nconst hitRows = rows.filter((r) => r.recordType !== \"diagnostic\");\n\nconst allowed = {};\nfor (const r of hitRows) { if (r.id) { allowed[String(r.id)] = true; } }\nconst seeds = Array.isArray(collected.seeds) ? collected.seeds : [];\nfor (const s of seeds) { allowed[String(s.publicationNumber)] = true; }\n\nconst kept = [];\nconst dropped = [];\nfor (const r of hitRows) {\n  if (r.id && allowed[String(r.id)]) { kept.push(r); } else { dropped.push({ reason: \"identifier not present in any retrieval payload\", record: r }); }\n}\n\nconst rawPatents = kept.filter((r) => r.recordType === \"patent\");\nconst nplHits = kept.filter((r) => r.recordType === \"npl\");\nconst bqHits = kept.filter((r) => r.source === \"bigquery-us-fulltext\");\nconst bqSkip = diagnostics.filter((d) => d.id === \"bigquery-skipped\")[0] || null;\n\nconst seedsExpandedSet = {};\nfor (const r of kept) {\n  const cbs = Array.isArray(r.citedBySeeds) ? r.citedBySeeds : [];\n  for (const s of cbs) { if (s) { seedsExpandedSet[String(s)] = true; } }\n}\nconst seedsExpanded = Object.keys(seedsExpandedSet);\n\nconst byNorm = {};\nconst patentHits = [];\nlet mergedAcrossLegs = 0;\nfor (const r of rawPatents) {\n  const key = String(r.normalizedId || r.id);\n  const existing = byNorm[key];\n  if (!existing) {\n    const row = Object.assign({}, r);\n    row.sources = [r.source];\n    row.alsoSeenAs = [];\n    byNorm[key] = row;\n    patentHits.push(row);\n    continue;\n  }\n  if (existing.sources.indexOf(r.source) === -1) { existing.sources.push(r.source); mergedAcrossLegs += 1; }\n  if (String(r.id) !== String(existing.id) && existing.alsoSeenAs.indexOf(String(r.id)) === -1) { existing.alsoSeenAs.push(String(r.id)); }\n  if (!existing.title && r.title) { existing.title = r.title; }\n  if (!existing.examinerCategory && r.examinerCategory) { existing.examinerCategory = r.examinerCategory; }\n}\n\nconst variantLog = Array.isArray(collected.variantLog) ? collected.variantLog : [];\nconst zeroVariants = variantLog.filter((v) => v.zeroResult);\nconst errVariants = variantLog.filter((v) => v.errored);\nconst faultCodes = [];\nfor (const v of errVariants) { if (v.faultCode && faultCodes.indexOf(v.faultCode) === -1) { faultCodes.push(v.faultCode); } }\nconst allErrored = variantLog.length > 0 && errVariants.length === variantLog.length;\nconst allMissed = variantLog.length > 0 && zeroVariants.length === variantLog.length;\nconst broadened = seeds.length === 0;\nconst nV = variantLog.length;\nconst variantWord = nV === 1 ? \"query variant\" : \"query variants\";\n\nconst opsOk = errVariants.length < variantLog.length;\nconst citationOk = kept.filter((r) => r.source === \"epo-examiner-citation\").length > 0;\nconst openAlexOk = kept.filter((r) => r.source === \"openalex\").length > 0;\nconst pubmedOk = kept.filter((r) => r.source === \"pubmed\").length > 0;\n\nconst sourcesRun = [];\nif (opsOk) { sourcesRun.push(\"EPO OPS (bibliographic search)\"); }\nif (citationOk) { sourcesRun.push(\"EPO OPS (examiner-cited references)\"); }\nif (openAlexOk) { sourcesRun.push(\"OpenAlex\"); }\nif (pubmedOk) { sourcesRun.push(\"PubMed\"); }\nif (!bqSkip) { sourcesRun.push(\"Google patents-public-data (US claims full text, BigQuery)\"); }\n\nconst sourcesNotRun = [];\nif (!opsOk) { sourcesNotRun.push(\"EPO OPS bibliographic search\"); }\nif (bqSkip) { sourcesNotRun.push(\"BigQuery US claims full text\"); }\nif (!openAlexOk) { sourcesNotRun.push(\"OpenAlex\"); }\nif (!pubmedOk) { sourcesNotRun.push(\"PubMed\"); }\n\nlet runVerdict;\nif (allErrored) {\n  runVerdict = \"UNRELIABLE - every EPO OPS query failed. This run searched no patent data. Re-run before drawing any conclusion.\";\n} else if (allMissed) {\n  runVerdict = \"DEGRADED - every keyword and classification variant returned zero results. Any patent art below came from the fallback sweep (\" + String(collected.broadenKind || \"fallback\") + \"), not from your search terms. The non-patent legs used those same terms and their results are UNVALIDATED - check them before relying on any of this.\";\n} else if (sourcesNotRun.length > 0 || errVariants.length > 0 || zeroVariants.length > 0) {\n  runVerdict = \"PARTIAL - \" + (sourcesNotRun.length > 0 ? (\"sources that did not run: \" + sourcesNotRun.join(\"; \") + \". \") : \"\") + (zeroVariants.length > 0 ? (zeroVariants.length + \" of \" + nV + \" \" + variantWord + \" returned zero results. \") : \"\") + \"Recall on this run is incomplete; see coverage.knownGaps.\";\n} else {\n  runVerdict = \"COMPLETE - all configured sources answered and every query variant returned results.\";\n}\n\nconst gaps = [];\nif (errVariants.length > 0) { gaps.push(\"EPO OPS FAILED on \" + errVariants.length + \" of \" + nV + \" queries (\" + faultCodes.join(\", \") + \"). Those queries returned NO ANSWER - not an empty answer.\"); }\nif (allMissed) { gaps.push(\"EVERY query variant returned zero results. The OpenAlex and PubMed legs are driven by the SAME concept and synonym terms, so on a run like this their output is not corroborated by anything and has been observed returning plainly off-topic literature. Treat the non-patent list as unvalidated.\"); }\nelse if (zeroVariants.length > 0) { gaps.push(zeroVariants.length + \" of \" + nV + \" \" + variantWord + \" returned zero results - that vocabulary missed, which is not evidence that no art exists.\"); }\nif (bqSkip) { gaps.push(\"US claims full text was NOT searched on this run - see coverage.bigQuery.\"); }\ngaps.push(\"Only \" + nV + \" \" + variantWord + \" and up to 4 citation seeds were run, to stay inside the caller timeout and the EPO fair-use limits. A deeper sweep needs a direct workflow run, not an MCP call.\");\ngaps.push(\"EPO OPS searches title and abstract only (field ta). A document whose abstract uses different vocabulary is invisible to keyword search and reachable only via classification or citation.\");\ngaps.push(\"OPS full text serves EP and WO; it does not serve US full text.\");\ngaps.push(\"BigQuery covers US full text only, and only for CPC areas with a subset built.\");\ngaps.push(\"No foreign-language original-text search; machine-translated abstracts only where available.\");\ngaps.push(\"No commercial database coverage (no Derwent, no chemical structure search, no sequence homology).\");\ngaps.push(\"Nothing here scores relevance. Every row was returned by an API for the terms supplied; none has been judged against the asserted novelty.\");\n\nreturn [{ json: {\n  runVerdict: runVerdict,\n  scopeLimitation: \"FIRST-LOOK / KNOCK-OUT SEARCH ONLY. This is not a clearance, validity, freedom-to-operate or patentability opinion, and it is not a substitute for a professional searcher. It is educational and creates no attorney-client relationship.\",\n  assertedNovelty: String(request.disclosure || \"\"),\n  coverage: {\n    runAt: new Date().toISOString(),\n    sourcesRun: sourcesRun,\n    sourcesNotRun: sourcesNotRun,\n    queryVariantsRun: nV,\n    zeroResultVariants: zeroVariants.length,\n    erroredVariants: errVariants.length,\n    faultCodes: faultCodes,\n    zeroResultDetail: zeroVariants,\n    erroredDetail: errVariants,\n    broadeningTriggered: broadened,\n    broadeningQuery: broadened ? String(collected.broadenCql || \"\") : \"\",\n    seedsFromKeywordSearch: seeds.length,\n    seedsExpandedForCitations: seedsExpanded.length,\n    seedsExpandedList: seedsExpanded,\n    crossLegDuplicatesMerged: mergedAcrossLegs,\n    bigQuery: bqSkip\n      ? { ran: false, reason: String(bqSkip.reason || \"\"), requiredBytes: bqSkip.requiredBytes || 0, billed: bqSkip.billed === true, consequence: \"US claims text was not searched. Treat US recall on this run as bibliographic and citation based only.\" }\n      : { ran: true, hits: bqHits.length, attribution: \"Google Patents Public Data, CC BY 4.0 - IFI CLAIMS Patent Services and Google. Attribution is required wherever these results are reproduced.\" },\n    knownGaps: gaps\n  },\n  patentHits: patentHits,\n  nplHits: nplHits,\n  diagnostics: diagnostics,\n  verificationLog: { variantLog: variantLog, recordsIn: rows.length, hitRecords: hitRows.length, diagnosticRecords: diagnostics.length, recordsKept: kept.length, recordsDropped: dropped.length, crossLegDuplicatesMerged: mergedAcrossLegs, drops: dropped },\n  dutyOfDisclosureNote: \"Anything surfaced here that is material to a pending application may engage 37 C.F.R. 1.56. Finding art creates obligations.\",\n  engagementNote: \"A knock-out search is a limited-scope engagement under Model Rule 1.2(c); the limitation must be reasonable and the client must give informed consent.\"\n} }];"
+      },
+      "id": "09880e36-8147-402e-82d4-7cf7aecbb547",
+      "name": "Validate And Assemble Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1152,
+        608
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Seed and expand — do not query once\n\nThe Build Query Plan node multiplies one disclosure into many CQL variants (concept x synonym, plus CPC-scoped variants). Recall is governed by vocabulary match, not data coverage: \"stepped\" and \"gradient\" describe the same structure but return completely different result sets.\n\nZero results is a signal to broaden, never an answer — see the Seeds Found? branch.",
+        "color": 4
+      },
+      "id": "f80bd8f3-148b-4797-ad62-d4270acdb1ef",
+      "name": "Sticky Note 20e2a3e4",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        112,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Examiner citations are the strongest leg\n\nEPO OPS biblio carries references-cited with examiner relevance categories (X / Y / A). This converts one lucky keyword hit into an examiner-validated art set — art that no keyword query in this run returned.\n\nThis stage is mandatory, not optional.",
+        "color": 3
+      },
+      "id": "a0c6cf6b-7dd9-4556-8609-89cac6f81f57",
+      "name": "Sticky Note aa3371d0",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        112,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## The fabrication guardrail\n\nValidate And Assemble Report builds an allow-list of every identifier that actually came back from an API, then drops anything not on it and LOGS the drop. Silent filtering is not acceptable — a fabrication attempt is signal.\n\nEvery output carries its own coverage statement, known-gap list and scope limitation.",
+        "color": 5
+      },
+      "id": "ad029afe-4133-424f-93b5-523ae9d69634",
+      "name": "Sticky Note 17b0f470",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        112,
+        816
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const src = $input.first().json || {};\nconst splitList = (v) => String(v || \"\").split(\",\").map((s) => s.trim()).filter((s) => s.length > 0);\nconst clean = (s) => s.replace(/[^a-z0-9 -]/gi, \" \").replace(/\\s+/g, \" \").trim().toLowerCase();\nconst concepts = splitList(src.conceptTerms).map(clean).filter((s) => s.length > 0);\nconst synonyms = splitList(src.synonymTerms).map(clean).filter((s) => s.length > 0);\nconst conceptPattern = concepts.length ? (\"(\" + concepts.join(\"|\") + \")\") : \"\";\nconst synonymPattern = synonyms.length ? (\"(\" + synonyms.join(\"|\") + \")\") : \"\";\nconst cpcRaw = String(src.cpc || \"\").trim().toUpperCase().replace(/\\s+/g, \"\");\nconst sub = cpcRaw.match(/^([A-Z]\\d{2}[A-Z])/);\nconst cpcPrefix = sub ? sub[1] : \"\";\nconst before = String(src.dateBefore || \"\").trim();\nreturn [{ json: { conceptPattern: conceptPattern, synonymPattern: synonymPattern, cpcPrefix: cpcPrefix, cpcFull: cpcRaw, dateBefore: before } }];"
+      },
+      "id": "dc4d68a4-e584-4311-90db-5d5208d75403",
+      "name": "Build BigQuery Query Terms",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1008,
+        1120
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "projectId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "REPLACE_WITH_YOUR_GCP_PROJECT_ID"
+        },
+        "sqlQuery": "WITH cov AS (\n  SELECT COUNT(*) AS n\n  FROM `REPLACE_WITH_YOUR_GCP_PROJECT_ID.prior_art.us_claims_by_cpc`\n  WHERE cpc_prefix = @cpcPrefix\n),\nhits AS (\n  SELECT publication_number, country_code, publication_date, title\n  FROM `REPLACE_WITH_YOUR_GCP_PROJECT_ID.prior_art.us_claims_by_cpc`\n  WHERE cpc_prefix = @cpcPrefix\n    AND REGEXP_CONTAINS(LOWER(claims_text), @conceptPattern)\n    AND REGEXP_CONTAINS(LOWER(claims_text), @synonymPattern)\n    AND (@dateBefore = '' OR publication_date < CAST(@dateBefore AS INT64))\n  ORDER BY publication_date DESC\n  LIMIT 25\n)\nSELECT 'hit' AS row_type, h.publication_number, h.country_code, h.publication_date, h.title, (SELECT n FROM cov) AS subset_docs\nFROM hits AS h\nUNION ALL\nSELECT 'coverage', NULL, NULL, NULL, NULL, (SELECT n FROM cov)",
+        "options": {
+          "location": "US",
+          "maximumBytesBilled": "5000000000",
+          "maxResults": 25,
+          "timeoutMs": 120000,
+          "queryParameters": {
+            "namedParameters": [
+              {
+                "name": "conceptPattern",
+                "value": "={{ $('Build BigQuery Query Terms').first().json.conceptPattern }}"
+              },
+              {
+                "name": "synonymPattern",
+                "value": "={{ $('Build BigQuery Query Terms').first().json.synonymPattern }}"
+              },
+              {
+                "name": "cpcPrefix",
+                "value": "={{ $('Build BigQuery Query Terms').first().json.cpcPrefix }}"
+              },
+              {
+                "name": "dateBefore",
+                "value": "={{ $('Build BigQuery Query Terms').first().json.dateBefore }}"
+              }
+            ]
+          }
+        }
+      },
+      "id": "84a57e6a-93fb-4a40-b952-46b24990c210",
+      "name": "BigQuery US Full-Text Search",
+      "type": "n8n-nodes-base.googleBigQuery",
+      "typeVersion": 2.1,
+      "position": [
+        -784,
+        1120
+      ],
+      "retryOnFail": false,
+      "alwaysOutputData": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const normId = (raw) => {\n  let s = String(raw || \"\").toUpperCase().replace(/[^A-Z0-9]/g, \"\");\n  s = s.replace(/[A-Z]\\d?$/, \"\");\n  const m = s.match(/^([A-Z]{2})(\\d+)$/);\n  if (!m) { return s; }\n  const cc = m[1];\n  let num = m[2];\n  if (cc === \"US\" && num.length === 10 && (num.slice(0, 2) === \"19\" || num.slice(0, 2) === \"20\")) {\n    num = num.slice(0, 4) + num.slice(4).padStart(7, \"0\");\n  }\n  return cc + num;\n};\nconst cfg = $(\"Build BigQuery Query Terms\").first().json || {};\nconst cpcPrefix = String(cfg.cpcPrefix || \"\");\nconst rows = $input.all().map((i) => i.json || {});\nlet subsetDocs = 0;\nfor (const r of rows) { const n = Number(r.subset_docs || 0); if (n > subsetDocs) { subsetDocs = n; } }\nconst hits = rows.filter((r) => r.row_type === \"hit\" && r.publication_number);\n\nif (subsetDocs === 0) {\n  return [{ json: {\n    source: \"bigquery-us-fulltext\",\n    recordType: \"diagnostic\",\n    id: \"bigquery-skipped\",\n    title: \"BigQuery US full-text search returned nothing because no subset covers this CPC area\",\n    reason: cpcPrefix\n      ? (\"No rows in prior_art.us_claims_by_cpc for cpc_prefix '\" + cpcPrefix + \"'. US claims text was NOT searched. Run the BigQuery Prior-Art Subset Builder for this CPC area, then re-run.\")\n      : \"No CPC symbol was supplied, so the US claims-text leg had no subset to target. US claims text was NOT searched.\",\n    subsetDocuments: 0,\n    billed: false,\n    errored: false,\n    url: \"\"\n  } }];\n}\n\nconst out = [];\nfor (const r of hits) {\n  const pn = String(r.publication_number);\n  out.push({ json: {\n    source: \"bigquery-us-fulltext\",\n    recordType: \"patent\",\n    id: pn,\n    normalizedId: normId(pn),\n    title: String(r.title || \"\"),\n    year: r.publication_date ? String(r.publication_date).slice(0, 4) : \"\",\n    matchedIn: \"US claims text\",\n    subsetDocumentsSearched: subsetDocs,\n    url: \"https://patents.google.com/patent/\" + pn,\n    licenceFlag: \"Google Patents Public Data, CC BY 4.0 - attribution required (IFI CLAIMS Patent Services and Google).\"\n  } });\n}\nreturn out;"
+      },
+      "id": "bcbfcbc8-9557-48df-8845-a04b2b5fe817",
+      "name": "Normalize BigQuery Hits",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -560,
+        1040
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json || {};\nconst errText = String(item.error || item.message || \"\");\nlet requiredBytes = 0;\nlet ceilingBytes = 0;\nconst m = errText.match(/bytes billed: (\\d+)\\.\\s*(\\d+) or higher required/i);\nif (m) { ceilingBytes = Number(m[1]); requiredBytes = Number(m[2]); }\nlet reason;\nlet overCeiling = false;\nif (requiredBytes > 0) {\n  overCeiling = true;\n  const gb = (requiredBytes / 1000000000).toFixed(1);\n  const capGb = (ceilingBytes / 1000000000).toFixed(1);\n  reason = \"Query refused by BigQuery WITHOUT charge: it would scan \" + gb + \" GB, above the maximumBytesBilled ceiling of \" + capGb + \" GB. Nothing was billed. Raise the ceiling, or narrow the query with a materialised CPC subset.\";\n} else if (errText) {\n  reason = \"BigQuery returned an error, so the US full-text leg did not run: \" + errText;\n} else {\n  reason = \"The BigQuery leg did not run and returned no error text.\";\n}\nreturn [{ json: {\n  source: \"bigquery-us-fulltext\",\n  recordType: \"diagnostic\",\n  id: \"bigquery-skipped\",\n  title: \"BigQuery US full-text search was NOT run\",\n  reason: reason,\n  requiredBytes: requiredBytes,\n  ceilingBytes: ceilingBytes,\n  overCeiling: overCeiling,\n  billed: false,\n  errored: errText ? true : false,\n  url: \"\"\n} }];"
+      },
+      "id": "d0e40553-2d92-4753-9302-7c536794e868",
+      "name": "Log Skipped BigQuery Query",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -560,
+        1232
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## BigQuery — US claims full text, from a materialised subset\n\nSearches `prior_art.us_claims_by_cpc`, a clustered table built once per CPC area by the **BigQuery Prior-Art Subset Builder** workflow. C25B built 2026-08-28: **23,368 US documents**, 1950-01-10 to 2026-04-21.\n\n**Why a subset.** Querying `patents-public-data` directly measured **~157 GB per run** — about six runs inside BigQuery's 1 TiB monthly free tier. The subset pays that scan once per art area and makes every later search small enough that `maximumBytesBilled` at 5 GB is a real ceiling rather than a formality.\n\n**Do not use the node's `dryRun` option as a cost guard.** Tested 2026-08-28: with `dryRun: true` set, the node still executed and billed the query. `maximumBytesBilled` is the guard here — BigQuery refuses an over-ceiling job without charge — though that behaviour has not itself been independently verified.\n\nThe query returns a coverage row so a genuine zero-hit result can be told apart from a CPC area with no subset built. Run the Subset Builder for A61K, C12N or any other area you work in.",
+        "height": 420,
+        "width": 1120,
+        "color": 7
+      },
+      "id": "5bb0dca0-db2b-4021-809a-1b1dc2b24a96",
+      "name": "Sticky Note BigQuery",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        96,
+        1024
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 3
+      },
+      "id": "95e8c5a9-4a8c-4c63-9904-4075f6443094",
+      "name": "Throttle OPS Search",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -416,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 3
+      },
+      "id": "bccbf16a-72a1-45e0-9144-db27c44220bb",
+      "name": "Throttle OPS Biblio",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        608,
+        400
+      ]
+    }
+  ],
+  "connections": {
+    "Prior Art Request": {
+      "main": [
+        [
+          {
+            "node": "Build Query Plan",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "OpenAlex Search",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "PubMed Search",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Build BigQuery Query Terms",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Query Plan": {
+      "main": [
+        [
+          {
+            "node": "Loop Query Variants",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect Seed Publications": {
+      "main": [
+        [
+          {
+            "node": "Seeds Found?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Seeds Found?": {
+      "main": [
+        [
+          {
+            "node": "Explode Seeds",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Broadened Classification Sweep",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Explode Seeds": {
+      "main": [
+        [
+          {
+            "node": "Loop Seeds",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Examiner Citations": {
+      "main": [
+        [
+          {
+            "node": "Merge All Sources",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge All Sources": {
+      "main": [
+        [
+          {
+            "node": "Validate And Assemble Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Seeds": {
+      "main": [
+        [
+          {
+            "node": "Extract Examiner Citations",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "EPO Biblio And Cited References",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Broadened Classification Sweep": {
+      "main": [
+        [
+          {
+            "node": "Collect Broadened Seeds",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect Broadened Seeds": {
+      "main": [
+        [
+          {
+            "node": "Loop Seeds",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Query Variants": {
+      "main": [
+        [
+          {
+            "node": "Collect Seed Publications",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "EPO OPS Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAlex Search": {
+      "main": [
+        [
+          {
+            "node": "Normalize OpenAlex",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize OpenAlex": {
+      "main": [
+        [
+          {
+            "node": "Merge All Sources",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "PubMed Search": {
+      "main": [
+        [
+          {
+            "node": "PubMed Summaries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PubMed Summaries": {
+      "main": [
+        [
+          {
+            "node": "Normalize PubMed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize PubMed": {
+      "main": [
+        [
+          {
+            "node": "Merge All Sources",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "BigQuery US Full-Text Search": {
+      "main": [
+        [
+          {
+            "node": "Normalize BigQuery Hits",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Skipped BigQuery Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize BigQuery Hits": {
+      "main": [
+        [
+          {
+            "node": "Merge All Sources",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "Log Skipped BigQuery Query": {
+      "main": [
+        [
+          {
+            "node": "Merge All Sources",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "EPO OPS Search": {
+      "main": [
+        [
+          {
+            "node": "Throttle OPS Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Throttle OPS Search": {
+      "main": [
+        [
+          {
+            "node": "Loop Query Variants",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "EPO Biblio And Cited References": {
+      "main": [
+        [
+          {
+            "node": "Throttle OPS Biblio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Throttle OPS Biblio": {
+      "main": [
+        [
+          {
+            "node": "Loop Seeds",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build BigQuery Query Terms": {
+      "main": [
+        [
+          {
+            "node": "BigQuery US Full-Text Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": true
+  },
+  "pinData": {}
+}

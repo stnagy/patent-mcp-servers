@@ -1,0 +1,131 @@
+{
+  "name": "Prior Art First Look MCP Server",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "prior-art-first-look",
+        "instructions": "This server exposes a FIRST-LOOK (knock-out) prior art search. It is not a clearance, validity, FTO or patentability search and does not replace a professional searcher.\n\nBefore calling the tool, do the work of building a synonym set. Recall is governed by vocabulary match, not data coverage — the same structure described as \"stepped\" and as \"gradient\" returns entirely different results. Generate every plausible alternative wording for the distinguishing feature, including both attorney and engineer phrasings, and pass them all.\n\nAlways supply a CPC symbol when you can identify one. Classification scoping is the mechanism that rescues a vocabulary mismatch.\n\nWhen reporting results to a user: never state a publication number that did not come back in the tool output; reproduce the scope limitation and the coverage statement; and if the coverage statement shows zero-result variants, say so plainly rather than implying the art does not exist."
+      },
+      "id": "f865026c-a740-40d5-864f-31c56ea7ca8b",
+      "name": "Prior Art First Look MCP Server",
+      "type": "@n8n/n8n-nodes-langchain.mcpTrigger",
+      "typeVersion": 2.1,
+      "position": [
+        -304,
+        48
+      ]
+    },
+    {
+      "parameters": {
+        "description": "Run a FIRST-LOOK (knock-out) prior art search across five free sources: EPO OPS worldwide bibliographic search, EPO examiner-cited references (X / Y / A categories), Google patents-public-data US claims full text via BigQuery, OpenAlex and PubMed.\n\nThis is NOT a clearance, validity, freedom-to-operate or patentability search, and it does not replace a professional searcher. Use it to decide whether to keep spending money on an idea, and to orient a real search.\n\nIT DOES NOT SCORE RELEVANCE. Every row it returns was retrieved by an API for the terms you supplied; none has been judged against the asserted novelty. Treat the output as a reading list, not a result set, and read the coverage statement before relying on any of it.\n\nHOW TO CALL IT WELL — the quality of the result depends almost entirely on the terms you supply:\n- conceptTerms: the core structural or functional nouns of the invention, comma separated (e.g. \"porous transport layer, electrolysis\"). Keep these to the things the invention IS.\n- synonymTerms: comma-separated ALTERNATIVE WORDINGS for the distinguishing feature, and supply several. This is the single most important input. Recall here is governed by vocabulary match, not by data coverage: \"stepped\", \"graded\", \"gradient\" and \"bimodal\" describe the same structure but return completely different result sets. Supply every plausible phrasing you can think of, including the terms a patent attorney would use and the terms an engineer would use.\n- cpc: a CPC symbol scoping the art area (e.g. C25B11/032). Strongly recommended — classification scoping is what rescues a query whose vocabulary does not match the abstracts, it is the fallback used when every keyword variant returns nothing, and its four-character subclass (e.g. C25B) is what selects the US claims-text subset. Without a CPC symbol the US full-text leg cannot run.\n- dateBefore: YYYYMMDD priority or filing cutoff, if there is one.\n- disclosure: the inventor's own description of the invention, in their words. It is echoed back in the report as the asserted point of novelty and is not rewritten.\n\nThe tool multiplies these into many CQL variants, broadens automatically if nothing comes back, expands the best hits through examiner citations, searches US claims text where a subset has been built, and returns a report with a runVerdict, a coverage statement, a known-gap list, a verification log and a scope limitation. Read the runVerdict first — zero results from a variant means the vocabulary missed, not that no art exists, and a DEGRADED verdict means the non-patent results are unvalidated.",
+        "workflowId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "REPLACE_WITH_YOUR_RETRIEVAL_ENGINE_ID",
+          "cachedResultName": "Prior Art First Look — Retrieval Engine"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false,
+          "schema": [
+            {
+              "id": "disclosure",
+              "displayName": "disclosure",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "conceptTerms",
+              "displayName": "conceptTerms",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "synonymTerms",
+              "displayName": "synonymTerms",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "cpc",
+              "displayName": "cpc",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "dateBefore",
+              "displayName": "dateBefore",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            }
+          ],
+          "value": {
+            "disclosure": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('disclosure', \"The inventor's own description of the invention, in their words. Echoed back as the asserted point of novelty; not rewritten.\") }}",
+            "conceptTerms": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('conceptTerms', 'Comma-separated core structural or functional nouns of the invention, e.g. \"porous transport layer, electrolysis\".') }}",
+            "synonymTerms": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('synonymTerms', 'Comma-separated ALTERNATIVE wordings for the distinguishing feature. Supply several — this drives recall more than anything else. E.g. \"stepped, graded, gradient, bimodal, sintered\".') }}",
+            "cpc": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('cpc', 'A CPC symbol scoping the art area, e.g. C25B11/032. Strongly recommended; used for classification-scoped variants and as the zero-result fallback.', 'string', '') }}",
+            "dateBefore": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('dateBefore', 'Priority or filing cutoff as YYYYMMDD. Leave empty for no cutoff.', 'string', '') }}"
+          }
+        }
+      },
+      "id": "3fe02720-4f5f-416c-9708-b58b6025e676",
+      "name": "Prior Art First Look",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        -304,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Prior Art First Look — MCP server\n\nOne tool, wired to the \"Prior Art First Look — Retrieval Engine\" sub-workflow.\n\nThe tool description and the server instructions both push the caller to supply a SYNONYM SET and a CPC symbol, because those two inputs — not the data sources — are what determine recall.\n\nScope discipline lives in three places at once: the server instructions, the tool description, and the scopeLimitation field the engine returns on every run.",
+        "color": 6
+      },
+      "id": "9c646e45-0999-4559-8010-60203dae9508",
+      "name": "Sticky Note 14132675",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        112,
+        304
+      ]
+    }
+  ],
+  "connections": {
+    "Prior Art First Look": {
+      "ai_tool": [
+        [
+          {
+            "node": "Prior Art First Look MCP Server",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": true
+  },
+  "pinData": {}
+}
