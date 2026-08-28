@@ -61,12 +61,16 @@ says so, but nothing in the pipeline can prevent it.
 | **A service account with two IAM roles** | `roles/bigquery.jobUser` **and** `roles/bigquery.dataEditor`. Missing `jobUser` is the most common setup failure. |
 | **A subset build per CPC area you work in** | The US claims-text leg returns nothing until you run the Subset Builder for that CPC subclass. See step 6. |
 
-> ### ⚠️ The MCP endpoint is unauthenticated by default
+> ### ⚠️ This endpoint is authenticated — and that is not the whole control
 >
-> As with the other servers in this repository, the trigger ships with no authentication
-> set. Anyone with the Production URL can spend your EPO quota **and your BigQuery
-> bytes**. That second one is billable. Set Bearer or Header auth on the trigger node
-> before publishing.
+> Unlike the EPO and USPTO servers in this repository, this trigger ships with
+> **n8n OAuth2** authentication set, because this is the server that can spend money
+> rather than merely quota. Your MCP client authorises against your n8n instance instead
+> of carrying a static token.
+>
+> That bounds *who* can call it. It does not bound *how much* they can spend: any
+> authorised caller can start a ~157 GB subset build by searching an unbuilt CPC area.
+> Set a project-level daily query-bytes quota as well.
 
 > ### ⚠️ Do not point the search at `patents-public-data` directly
 >
@@ -185,9 +189,9 @@ minutes later** to pick up the new subset.
 >   tier, now spent without asking you first.
 > - **There is no in-flight lock.** Re-running before a build finishes fires a *second*
 >   build for the same prefix — two calls, ~314 GB. Wait for the first to finish.
-> - **Any caller can trigger one.** This is what makes the unauthenticated trigger
->   materially riskier than it was: previously an unauthorised caller spent API quota,
->   now they can spend your BigQuery bytes. Set Bearer auth before publishing.
+> - **Any authorised caller can trigger one.** The trigger ships with n8n OAuth2 set, so
+>   a stranger with the URL cannot; anyone you have authorised can. Authentication is not
+>   a spend control — the daily query-bytes quota is.
 >
 > The one guard that *is* in place: the Subset Builder refuses any prefix that is not a
 > four-character CPC subclass. `STARTS_WITH(cp.code, '')` is true for every row, so an
@@ -214,6 +218,12 @@ version, so republish after every edit or your changes will not take effect.
 
 Open the **Prior Art First Look MCP Server** trigger node → **Production URL** → copy it
 (`https://<your-instance>/mcp/prior-art-first-look`). Add it as a custom connector.
+
+The trigger ships with **n8n OAuth2** authentication, so your client will run an
+authorisation flow against your n8n instance on first connect rather than accepting a
+token you paste in. If you would rather use a static Bearer token, change
+`Authentication` on the trigger node before publishing — the workflow does not depend on
+which one you pick.
 
 ### 10. Test
 
@@ -323,6 +333,7 @@ NCBI refuses it. That refusal is expected on this path and is classified as `emp
 | PubMed listed in `coverage.sourcesZeroResult` | It ran and matched nothing. Expected for any disclosure that is not biomedical — PubMed is searched with your patent vocabulary. Not a fault, and not a reason to change the contact email or tool name. |
 | Changes to a workflow have no effect | You saved but did not publish. Sub-workflow calls run the published version. |
 | The tool doesn't appear in your client | MCP clients cache the tool list. Reconnect the connector. |
+| The client cannot connect, or asks to authorise repeatedly | The trigger uses n8n OAuth2. Re-add the connector and complete the authorisation flow; a token pasted as a Bearer credential will not work unless you change `Authentication` on the trigger node. |
 
 ---
 

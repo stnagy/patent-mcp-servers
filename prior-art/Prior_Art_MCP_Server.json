@@ -3,6 +3,7 @@
   "nodes": [
     {
       "parameters": {
+        "authentication": "n8nOAuth2",
         "path": "prior-art-first-look",
         "instructions": "This server exposes a FIRST-LOOK (knock-out) prior art search. It is not a clearance, validity, FTO or patentability search and does not replace a professional searcher.\n\nBefore calling the tool, do the work of building a synonym set. Recall is governed by vocabulary match, not data coverage — the same structure described as \"stepped\" and as \"gradient\" returns entirely different results. Generate every plausible alternative wording for the distinguishing feature, including both attorney and engineer phrasings, and pass them all.\n\nAlways supply a CPC symbol when you can identify one. Classification scoping is the mechanism that rescues a vocabulary mismatch.\n\nWhen reporting results to a user: never state a publication number that did not come back in the tool output; reproduce the scope limitation and the coverage statement; and if the coverage statement shows zero-result variants, say so plainly rather than implying the art does not exist."
       },

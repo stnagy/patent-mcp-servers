@@ -53,16 +53,16 @@ the same `EPO OPS` credential as the EPO server if you already have it.
 > real call dies. The trigger records `success` in the execution log; the actual error
 > is only visible in the MCP client's response. These files ship with the trigger at v2.
 
-> ### ⚠️ The MCP endpoint is unauthenticated by default
+> ### ⚠️ Two of the three endpoints are unauthenticated
 >
-> All three triggers ship with no authentication set, so anyone with the Production URL
-> can spend your USPTO/EPO quota, your Mistral OCR budget, and — with Prior Art First
-> Look — your BigQuery bytes. If that matters, set Bearer or Header auth on the trigger
-> node before publishing.
+> The **EPO** and **USPTO** triggers ship with no authentication set, so anyone with the
+> Production URL can spend your USPTO/EPO quota and your Mistral OCR budget. If that
+> matters, set Bearer or Header auth on the trigger node before publishing.
 >
-> Prior Art First Look raises the stakes on this: it now builds a missing CPC subset
-> automatically, so an unauthorised caller can trigger a ~157 GB BigQuery scan simply by
-> searching an art area you have not built yet.
+> **Prior Art First Look ships with n8n OAuth2 set**, because it is the one that can
+> spend money: it builds a missing CPC subset automatically, so a call against an unbuilt
+> art area starts a ~157 GB BigQuery scan. Authentication bounds *who* can do that. It
+> does not bound *how much* — see Cost.
 
 > ### ⚠️ Retrieval is not judgment
 >
@@ -114,8 +114,10 @@ project-level daily query-bytes quota before your first run; the n8n node's `dry
 option is **not** a cost guard and was observed executing and billing the query anyway.
 
 Searching an art area with no subset now **starts that build automatically** — a ~157 GB
-scan, without a confirmation step, triggerable by anyone who can reach the endpoint. The
-daily query-bytes quota is the control that actually bounds this. Set it first.
+scan, with no confirmation step. The trigger's OAuth2 limits who can reach it, but any
+authorised caller can still spend, and there is no in-flight lock, so two searches of the
+same unbuilt area before the first build finishes cost ~314 GB. A project-level daily
+query-bytes quota is the only control that actually bounds this. Set it first.
 
 ---
 
